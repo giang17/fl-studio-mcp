@@ -192,6 +192,7 @@ class FLStudioTrigger:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=True,
             )
             window_ids = [line for line in search.stdout.splitlines() if line.strip()]
             if not window_ids:
@@ -202,6 +203,7 @@ class FLStudioTrigger:
                 ["xdotool", "windowactivate", "--sync", window_id],
                 capture_output=True,
                 timeout=10,
+                check=True,
             )
             time.sleep(0.3)
 
@@ -209,6 +211,7 @@ class FLStudioTrigger:
                 ["xdotool", "key", "ctrl+alt+y"],
                 capture_output=True,
                 timeout=10,
+                check=True,
             )
             return True
         except Exception:

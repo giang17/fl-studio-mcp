@@ -73,7 +73,7 @@ There is no API to programmatically create new patterns. You can only work with 
 - **macOS**, **Windows**, or **Linux** (FL Studio running under Wine)
   - macOS: IAC Driver (built-in, needs to be enabled)
   - Windows: [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
-  - Linux: nothing extra - the kernel's "Midi Through" ALSA port bridges into Wine (see [Linux (FL Studio under Wine)](#linux-fl-studio-under-wine))
+  - Linux: no virtual-MIDI package needed - the kernel's "Midi Through" ALSA port bridges into Wine; [xdotool](https://man.archlinux.org/man/xdotool.1) is required for Piano Roll auto-triggering on X11 (see [Linux (FL Studio under Wine)](#linux-fl-studio-under-wine))
 
 ## Which AI Clients Work With This?
 
