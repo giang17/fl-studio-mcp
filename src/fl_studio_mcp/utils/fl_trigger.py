@@ -179,6 +179,37 @@ class FLStudioTrigger:
         except Exception:
             return False
 
+    # FL Studio window titles look like "<project>.flp - FL Studio 2026" or
+    # "FL Studio 2026". A plain substring search for "FL Studio" also matches
+    # unrelated windows (e.g. a browser tab showing the fl-studio-mcp repo),
+    # so prefer titles that end in "FL Studio <version>".
+    LINUX_WINDOW_RE = r"( - |^)FL Studio [0-9]+$"
+
+    def _find_fl_windows_linux(self) -> list[str]:
+        """Return candidate FL Studio window ids, best match first."""
+        try:
+            search = subprocess.run(
+                ["xdotool", "search", "--onlyvisible", "--name", self.LINUX_WINDOW_RE],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+        except subprocess.CalledProcessError:
+            # No window matches the strict pattern; fall back to a substring
+            # search (xdotool exits 1 when nothing is found).
+            try:
+                search = subprocess.run(
+                    ["xdotool", "search", "--onlyvisible", "--name", "FL Studio"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                return []
+        return [line for line in search.stdout.splitlines() if line.strip()]
+
     def _trigger_linux(self) -> bool:
         """Trigger FL Studio (running under Wine/X11) using xdotool.
 
@@ -187,14 +218,7 @@ class FLStudioTrigger:
         (xdotool cannot synthesize keys on Wayland).
         """
         try:
-            search = subprocess.run(
-                ["xdotool", "search", "--onlyvisible", "--name", "FL Studio"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            )
-            window_ids = [line for line in search.stdout.splitlines() if line.strip()]
+            window_ids = self._find_fl_windows_linux()
             if not window_ids:
                 return False
 
