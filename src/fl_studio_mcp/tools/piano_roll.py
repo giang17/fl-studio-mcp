@@ -14,11 +14,11 @@ Communication flow:
 from __future__ import annotations
 
 import json
-import platform
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fl_studio_mcp.utils.fl_trigger import get_trigger, trigger_fl_studio
+from fl_studio_mcp.utils.midi_connection import get_fl_settings_base
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -26,13 +26,7 @@ if TYPE_CHECKING:
 
 def _get_fl_scripts_dir() -> Path:
     """Get the FL Studio Piano Roll scripts directory."""
-    system = platform.system()
-
-    if system in ("Darwin", "Windows"):
-        base = Path.home() / "Documents" / "Image-Line" / "FL Studio" / "Settings"
-    else:
-        # Linux fallback (FL Studio doesn't officially support Linux)
-        base = Path.home() / ".fl-studio" / "Settings"
+    base = get_fl_settings_base()
 
     scripts_dir = base / "Piano roll scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)

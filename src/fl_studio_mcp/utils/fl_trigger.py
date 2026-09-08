@@ -33,6 +33,8 @@ class FLStudioTrigger:
             self._trigger_func = self._trigger_macos
         elif self._system == "Windows":
             self._trigger_func = self._trigger_windows
+        elif self._system == "Linux":
+            self._trigger_func = self._trigger_linux
         else:
             self._trigger_func = None
 
@@ -177,6 +179,41 @@ class FLStudioTrigger:
         except Exception:
             return False
 
+    def _trigger_linux(self) -> bool:
+        """Trigger FL Studio (running under Wine/X11) using xdotool.
+
+        Mirrors the Windows path: focus the FL Studio window first so the
+        Ctrl+Alt+Y keystroke actually reaches it. Requires an X11 session
+        (xdotool cannot synthesize keys on Wayland).
+        """
+        try:
+            search = subprocess.run(
+                ["xdotool", "search", "--onlyvisible", "--name", "FL Studio"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            window_ids = [line for line in search.stdout.splitlines() if line.strip()]
+            if not window_ids:
+                return False
+
+            window_id = window_ids[-1]
+            subprocess.run(
+                ["xdotool", "windowactivate", "--sync", window_id],
+                capture_output=True,
+                timeout=10,
+            )
+            time.sleep(0.3)
+
+            subprocess.run(
+                ["xdotool", "key", "ctrl+alt+y"],
+                capture_output=True,
+                timeout=10,
+            )
+            return True
+        except Exception:
+            return False
+
     def trigger(self, delay: float = TRIGGER_DELAY) -> bool:
         """Trigger FL Studio to execute the Piano Roll script.
 
@@ -211,6 +248,8 @@ class FLStudioTrigger:
         if self._system == "Darwin":
             return "Cmd+Opt+Y"
         elif self._system == "Windows":
+            return "Ctrl+Alt+Y"
+        elif self._system == "Linux":
             return "Ctrl+Alt+Y"
         return "Unknown"
 
