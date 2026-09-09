@@ -409,6 +409,23 @@ retarget it before writing notes to a specific channel.
 Requires FL Studio 2024+ (the `patterns` scripting module); older versions
 get a clear error message.
 
+### Playlist / Arrangement
+
+| Tool | Description |
+|------|-------------|
+| `fl_list_playlist_tracks` | List playlist tracks (name, color, mute, solo, selection); untouched tracks are skipped by default |
+| `fl_set_playlist_track` | Rename, recolor (`#RRGGBB`), mute, solo or select a playlist track |
+| `fl_get_position` | Song position as bar/beat/tick and absolute ticks, loop mode, timebase |
+| `fl_list_markers` | Time markers in song order with bar/beat/tick |
+| `fl_add_marker` | Add a time marker at a bar (and beat) |
+| `fl_jump_to_marker` | Move the song position to a marker by name or by delta (+1 / -1) |
+
+FL applies song position changes, marker jumps and loop mode switches only
+after a controller callback returns, so these tools run one step per MIDI
+round trip (about 20 ms each). Marker names are kept unique by FL (a second
+"Chorus" becomes "Chorus #2"); markers cannot be deleted and clips cannot be
+placed in the playlist through the scripting API.
+
 ### Undo / Redo
 
 | Tool | Description |
