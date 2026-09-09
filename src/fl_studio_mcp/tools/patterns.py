@@ -35,15 +35,16 @@ def register_pattern_tools(mcp: FastMCP) -> None:
         are listed. Set include_default=True to list all 999 potential slots
         (slow, rarely useful).
 
-        Returns each pattern's index (1-based), name, color, length in beats
-        and selection state, plus the currently active pattern.
+        Returns each pattern's index (1-based), name, color, length in steps
+        (16 per bar in 4/4) and in bars, and selection state, plus the
+        currently active pattern.
         """
         conn = get_connection()
         return conn.send_command("patterns.getAll", {"include_default": include_default})
 
     @mcp.tool()
     def fl_get_current_pattern() -> dict:
-        """Get the currently active pattern (index, name, length in beats)."""
+        """Get the currently active pattern (index, name, length in steps and bars)."""
         conn = get_connection()
         return conn.send_command("patterns.getCurrent")
 

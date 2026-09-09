@@ -258,6 +258,25 @@ def _pattern_index_error(patterns, index: int) -> dict | None:
     return None
 
 
+def _pattern_length(patterns, index: int) -> dict:
+    """Pattern length in steps (what getPatternLength reports) and in bars.
+
+    FL counts 4 steps per beat; 64 steps are 4 bars in 4/4. The bar count is
+    derived from the project timebase and may be fractional.
+    """
+    steps = patterns.getPatternLength(index)
+    out = {"length_steps": steps}
+    try:
+        general = _general_mod()
+        ppq, ppb = general.getRecPPQ(), general.getRecPPB()
+        beats_per_bar = ppb // ppq if ppq else 0
+    except Exception:
+        beats_per_bar = 0
+    if beats_per_bar:
+        out["length_bars"] = steps / (4 * beats_per_bar)
+    return out
+
+
 def handle_patterns_get_count(params: dict) -> dict:
     try:
         patterns = _patterns_mod()
@@ -286,7 +305,7 @@ def handle_patterns_get_all(params: dict) -> dict:
                 "index": i,
                 "name": patterns.getPatternName(i),
                 "color": patterns.getPatternColor(i),
-                "length_beats": patterns.getPatternLength(i),
+                **_pattern_length(patterns, i),
                 "is_default": is_default,
                 "is_selected": patterns.isPatternSelected(i),
             })
@@ -304,7 +323,7 @@ def handle_patterns_get_current(params: dict) -> dict:
         return {
             "index": i,
             "name": patterns.getPatternName(i),
-            "length_beats": patterns.getPatternLength(i),
+            **_pattern_length(patterns, i),
         }
     except ImportError:
         return {"error": "patterns module not available (requires FL Studio 2024+)"}
@@ -378,6 +397,263 @@ def handle_patterns_set_name(params: dict) -> dict:
         return {"index": index, "name": patterns.getPatternName(index)}
     except ImportError:
         return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Playlist tracks and arrangement markers (lazy-imported)
+# ---------------------------------------------------------------------------
+#
+# FL applies transport changes (song position, marker jumps, loop mode) only
+# after the script callback returns, and drops a second change made in the
+# same callback. Every handler here therefore does one step and reads only
+# the state FL has already applied; the server sequences the steps.
+
+# transport.getSongPos / setSongPos mode: absolute ticks.
+SONGLENGTH_ABSTICKS = 2
+# Upper bound for the marker name scan; FL returns "" past the last marker.
+MARKER_NAME_LIMIT = 512
+
+
+def _playlist_mod():
+    """Lazily import the playlist module."""
+    import playlist  # noqa: PLC0415
+    return playlist
+
+
+def _arrangement_mod():
+    """Lazily import the arrangement module."""
+    import arrangement  # noqa: PLC0415
+    return arrangement
+
+
+def _timebase() -> tuple:
+    """Return (ppq, ppb): ticks per beat and ticks per bar."""
+    general = _general_mod()
+    return general.getRecPPQ(), general.getRecPPB()
+
+
+def _ticks_to_bst(ticks: int, ppq: int, ppb: int) -> dict:
+    """Split absolute ticks into a 1-based bar, beat and the tick remainder."""
+    if not ppq or not ppb:
+        return {"bar": None, "beat": None, "tick": None}
+    return {
+        "bar": ticks // ppb + 1,
+        "beat": (ticks % ppb) // ppq + 1,
+        "tick": ticks % ppq,
+    }
+
+
+def _color_to_rgb(color: int) -> dict:
+    """FL colors are 0x--BBGGRR (reported as signed ints)."""
+    return {"r": color & 0xFF, "g": (color >> 8) & 0xFF, "b": (color >> 16) & 0xFF}
+
+
+def _playlist_track_index_error(playlist, index) -> dict | None:
+    count = playlist.trackCount()
+    if isinstance(index, bool) or not isinstance(index, int) or index < 1 or index > count:
+        return {"error": f"Playlist track index {index!r} out of range (1..{count})"}
+    return None
+
+
+def _is_default_track_name(index: int, name: str) -> bool:
+    """Unnamed playlist tracks read back as "Track <n>"."""
+    return name.strip() == f"Track {index}"
+
+
+def _playlist_track_report(playlist, index: int) -> dict:
+    name = playlist.getTrackName(index)
+    color = playlist.getTrackColor(index) & 0xFFFFFF
+    return {
+        "index": index,
+        "name": name,
+        "is_unnamed": _is_default_track_name(index, name),
+        "color": "#%02x%02x%02x" % (color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF),
+        "is_muted": bool(playlist.isTrackMuted(index)),
+        "is_solo": bool(playlist.isTrackSolo(index)),
+        "is_selected": bool(playlist.isTrackSelected(index)),
+    }
+
+
+def handle_playlist_get_tracks(params: dict) -> dict:
+    """List playlist tracks; unnamed, untouched tracks are skipped by default."""
+    try:
+        playlist = _playlist_mod()
+        include_unnamed = bool(params.get("include_unnamed", False))
+        limit = int(params.get("limit", 50))
+        count = playlist.trackCount()
+        out = []
+        for i in range(1, count + 1):
+            report = _playlist_track_report(playlist, i)
+            if (
+                not include_unnamed
+                and report["is_unnamed"]
+                and not (report["is_muted"] or report["is_solo"] or report["is_selected"])
+            ):
+                continue
+            out.append(report)
+            if len(out) >= limit:
+                break
+        return {"tracks": out, "track_count": count}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_get_track(params: dict) -> dict:
+    try:
+        playlist = _playlist_mod()
+        index = params.get("index")
+        if error := _playlist_track_index_error(playlist, index):
+            return error
+        return {"track": _playlist_track_report(playlist, index)}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_set_track(params: dict) -> dict:
+    """Set name, color, mute, solo and selection of one playlist track.
+
+    Reads nothing back: FL may apply the change after this callback returns,
+    so the server fetches the track state in a second call.
+    """
+    try:
+        playlist = _playlist_mod()
+        index = params.get("index")
+        if error := _playlist_track_index_error(playlist, index):
+            return error
+        changed = []
+        if "name" in params:
+            playlist.setTrackName(index, str(params["name"]))
+            changed.append("name")
+        if params.get("rgb") is not None:
+            rgb = params["rgb"]
+            r, g, b = int(rgb["r"]), int(rgb["g"]), int(rgb["b"])
+            # FL Studio uses BGR format
+            playlist.setTrackColor(index, (b << 16) | (g << 8) | r)
+            changed.append("color")
+        if params.get("muted") is not None:
+            playlist.muteTrack(index, 1 if params["muted"] else 0)
+            changed.append("muted")
+        if params.get("solo") is not None:
+            playlist.soloTrack(index, 1 if params["solo"] else 0)
+            changed.append("solo")
+        if params.get("selected") is not None:
+            # selectTrack only toggles, so compare with the current state first
+            if bool(playlist.isTrackSelected(index)) != bool(params["selected"]):
+                playlist.selectTrack(index)
+            changed.append("selected")
+        return {"index": index, "changed": changed}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _position_report(arrangement) -> dict:
+    """The song position FL has applied, in absolute ticks and bar:beat:tick.
+
+    `ticks` is the arrangement time (unclamped, also beyond the song end);
+    `transport_ticks` is transport.getSongPos, which follows the pattern in
+    pattern mode and is clamped to the song length in song mode.
+    """
+    ppq, ppb = _timebase()
+    ticks = arrangement.currentTime(0)
+    report = {"ticks": ticks, **_ticks_to_bst(ticks, ppq, ppb)}
+    report.update({
+        "transport_ticks": transport.getSongPos(SONGLENGTH_ABSTICKS),
+        "hint": transport.getSongPosHint(),
+        "is_playing": transport.isPlaying() == 1,
+        "loop_mode": "song" if transport.getLoopMode() == 1 else "pattern",
+        "ppq": ppq,
+        "ppb": ppb,
+    })
+    return report
+
+
+def _marker_names(arrangement) -> list:
+    """Marker names in song order; FL returns "" past the last marker."""
+    names = []
+    for i in range(MARKER_NAME_LIMIT):
+        try:
+            name = arrangement.getMarkerName(i)
+        except Exception:
+            break
+        if not name:
+            break
+        names.append(name)
+    return names
+
+
+def handle_arrangement_get_position(params: dict) -> dict:
+    try:
+        arrangement = _arrangement_mod()
+        return {"position": _position_report(arrangement)}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_set_position(params: dict) -> dict:
+    """Set the song position in absolute ticks; FL applies it after this call."""
+    ticks = params.get("ticks")
+    if isinstance(ticks, bool) or not isinstance(ticks, int) or ticks < 0:
+        return {"error": f"ticks must be a non-negative integer, got {ticks!r}"}
+    try:
+        transport.setSongPos(ticks, SONGLENGTH_ABSTICKS)
+        return {"requested_ticks": ticks}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_jump_marker(params: dict) -> dict:
+    """Jump `delta` markers (song mode only); FL applies it after this call.
+
+    Returns the position before the jump, i.e. the state FL had applied.
+    """
+    delta = params.get("delta")
+    if isinstance(delta, bool) or not isinstance(delta, int) or delta == 0:
+        return {"error": f"delta must be a non-zero integer, got {delta!r}"}
+    try:
+        arrangement = _arrangement_mod()
+        before = arrangement.currentTime(0)
+        arrangement.jumpToMarker(delta, False)
+        return {"before_ticks": before}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_get_marker_names(params: dict) -> dict:
+    try:
+        arrangement = _arrangement_mod()
+        return {"names": _marker_names(arrangement)}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_add_marker(params: dict) -> dict:
+    """Add a time marker at absolute ticks; the name list updates at once."""
+    name = str(params.get("name", "")).strip()
+    ticks = params.get("ticks")
+    if not name:
+        return {"error": "Marker name must not be empty"}
+    if isinstance(ticks, bool) or not isinstance(ticks, int) or ticks < 0:
+        return {"error": f"ticks must be a non-negative integer, got {ticks!r}"}
+    try:
+        arrangement = _arrangement_mod()
+        arrangement.addAutoTimeMarker(ticks, name)
+        return {"name": name, "ticks": ticks, "names": _marker_names(arrangement)}
+    except ImportError:
+        return {"error": "arrangement module not available"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -626,6 +902,22 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_pianoroll_open(params)
     elif action == "plugins.getColor":
         return handle_plugins_get_color(params)
+    elif action == "playlist.getTracks":
+        return handle_playlist_get_tracks(params)
+    elif action == "playlist.getTrack":
+        return handle_playlist_get_track(params)
+    elif action == "playlist.setTrack":
+        return handle_playlist_set_track(params)
+    elif action == "arrangement.getPosition":
+        return handle_arrangement_get_position(params)
+    elif action == "arrangement.setPosition":
+        return handle_arrangement_set_position(params)
+    elif action == "arrangement.jumpMarker":
+        return handle_arrangement_jump_marker(params)
+    elif action == "arrangement.getMarkerNames":
+        return handle_arrangement_get_marker_names(params)
+    elif action == "arrangement.addMarker":
+        return handle_arrangement_add_marker(params)
 
     else:
         return {"error": f"Unknown action: {action}"}

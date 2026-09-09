@@ -309,7 +309,8 @@ def _enrich_pr_context(context: dict) -> dict:
                 context["current_pattern"] = {
                     "index": result.get("index"),
                     "name": result.get("name"),
-                    "length_beats": result.get("length_beats"),
+                    "length_steps": result.get("length_steps"),
+                    "length_bars": result.get("length_bars"),
                 }
         if "selected_channel" not in context:
             result = conn.send_command("channels.getSelected")
