@@ -297,6 +297,12 @@ FL Studio start (and possibly after loading another project) step 3 is needed
 again. The note tools report whether the script actually ran; if the request
 stays queued, repeat step 3 and call the tool again.
 
+Before sending the keystroke the server brings FL Studio to the front and asks
+the controller script to focus the piano roll, so the trigger works even when
+the playlist or mixer was FL's focused window. An open piano roll does not
+follow channels selected via scripting; call `fl_open_piano_roll(channel)` to
+retarget it before writing notes to a specific channel.
+
 > On Linux the auto-trigger uses `xdotool` (X11 sessions only) and sends the
 > same Ctrl+Alt+Y keystroke as on Windows.
 
@@ -375,6 +381,16 @@ stays queued, repeat step 3 and call the tool again.
 | `fl_next_preset` | Next preset |
 | `fl_prev_preset` | Previous preset |
 | `fl_get_plugin_color` | Get plugin color |
+
+### Windows / focus
+
+| Tool | Description |
+|------|-------------|
+| `fl_get_focused_window` | Which FL windows are visible and which one has focus, plus the focused window's caption |
+| `fl_show_window` | Show an FL window (mixer, channel_rack, playlist, piano_roll, browser) and optionally focus it |
+| `fl_hide_window` | Hide an FL window |
+| `fl_focus_window` | Give an FL window FL-internal focus |
+| `fl_open_piano_roll` | Retarget the piano roll to a channel (hide, select, show) and focus it - use before `fl_send_notes` |
 
 ### Patterns
 

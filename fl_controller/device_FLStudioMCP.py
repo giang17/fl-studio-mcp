@@ -124,6 +124,128 @@ def _patterns_mod():
     return patterns
 
 
+def _ui_mod():
+    """Lazily import the ui module."""
+    import ui  # noqa: PLC0415
+    return ui
+
+
+# FL window indices (midi.wid* constants) by the names the MCP tools accept.
+_WINDOWS = {
+    "mixer": 0,
+    "channel_rack": 1,
+    "playlist": 2,
+    "piano_roll": 3,
+    "browser": 4,
+}
+
+
+def _window_index(params: dict) -> int:
+    """Resolve the 'window' parameter (name or index) to an FL window index."""
+    window = params.get("window", "piano_roll")
+    if isinstance(window, int) and not isinstance(window, bool):
+        return window
+    index = _WINDOWS.get(str(window).lower())
+    if index is None:
+        raise ValueError("Unknown window '%s'. Valid: %s" % (window, ", ".join(_WINDOWS)))
+    return index
+
+
+def _window_report(ui, index: int) -> dict:
+    """Visibility/focus of one window plus the caption of whatever is focused."""
+    name = next((n for n, i in _WINDOWS.items() if i == index), str(index))
+    return {
+        "window": name,
+        "visible": bool(ui.getVisible(index)),
+        "focused": bool(ui.getFocused(index)),
+        "focused_caption": ui.getFocusedFormCaption(),
+    }
+
+
+def handle_ui_get_focus(params: dict) -> dict:
+    """Report which FL windows are visible/focused and the focused window's caption.
+
+    The caption of a focused piano roll is "Piano roll - <channel name>", which
+    is the only way to learn which channel an open piano roll targets.
+    """
+    try:
+        ui = _ui_mod()
+        return {
+            "focused": {n: bool(ui.getFocused(i)) for n, i in _WINDOWS.items()},
+            "visible": {n: bool(ui.getVisible(i)) for n, i in _WINDOWS.items()},
+            "caption": ui.getFocusedFormCaption(),
+            "form_id": ui.getFocusedFormID(),
+            "plugin": ui.getFocusedPluginName(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_ui_show_window(params: dict) -> dict:
+    """Show an FL window and (by default) give it FL-internal focus."""
+    try:
+        ui = _ui_mod()
+        index = _window_index(params)
+        ui.showWindow(index)
+        if params.get("focus", True):
+            ui.setFocused(index)
+        return _window_report(ui, index)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_ui_hide_window(params: dict) -> dict:
+    """Hide an FL window."""
+    try:
+        ui = _ui_mod()
+        index = _window_index(params)
+        ui.hideWindow(index)
+        return _window_report(ui, index)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_ui_set_focus(params: dict) -> dict:
+    """Give an FL window FL-internal focus (without changing its visibility)."""
+    try:
+        ui = _ui_mod()
+        index = _window_index(params)
+        ui.setFocused(index)
+        return _window_report(ui, index)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_pianoroll_open(params: dict) -> dict:
+    """Retarget the piano roll to a channel and make it FL's focused window.
+
+    An open piano roll ignores channels selected via scripting, and merely
+    showing/focusing it does not help either. What does work (verified against
+    FL 2026): hide the piano roll, select the channel, show it again - a
+    freshly shown piano roll picks up the selected channel. Without "index"
+    the piano roll is only shown and focused, its target is left alone.
+    """
+    try:
+        ui = _ui_mod()
+        pr = _WINDOWS["piano_roll"]
+        index = params.get("index")
+        if index is not None:
+            index = int(index)
+            if index < 0 or index >= channels.channelCount(True):
+                return {"error": "Channel index %d out of range (0..%d)"
+                        % (index, channels.channelCount(True) - 1)}
+            ui.hideWindow(pr)
+            channels.selectOneChannel(index, True)
+        ui.showWindow(pr)
+        ui.setFocused(pr)
+        report = _window_report(ui, _WINDOWS["piano_roll"])
+        if index is not None:
+            report["channel"] = {"index": index, "name": channels.getChannelName(index, True)}
+        return report
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _pattern_index_error(patterns, index: int) -> dict | None:
     """Return an error dict for indices outside 1..patternMax, else None.
 
@@ -480,6 +602,18 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_general_save_undo_point(params)
     elif action == "general.getUndoStatus":
         return handle_general_get_undo_status(params)
+
+    # UI / window handling
+    elif action == "ui.getFocus":
+        return handle_ui_get_focus(params)
+    elif action == "ui.showWindow":
+        return handle_ui_show_window(params)
+    elif action == "ui.hideWindow":
+        return handle_ui_hide_window(params)
+    elif action == "ui.setFocus":
+        return handle_ui_set_focus(params)
+    elif action == "pianoroll.open":
+        return handle_pianoroll_open(params)
     elif action == "plugins.getColor":
         return handle_plugins_get_color(params)
 

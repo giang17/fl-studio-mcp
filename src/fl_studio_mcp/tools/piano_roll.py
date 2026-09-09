@@ -172,6 +172,28 @@ def _try_read_response() -> dict | None:
     return data if isinstance(data, dict) else {"raw_response": data}
 
 
+def _focus_piano_roll() -> str | None:
+    """Make the piano roll FL's focused window before sending the trigger keystroke.
+
+    Ctrl+Alt+Y only reaches the piano roll script while the piano roll is the
+    focused window inside FL Studio; the OS-level window activation done by
+    the trigger cannot guarantee that. Best effort: a missing MIDI bridge must
+    not break the keystroke path. Returns the focused window's caption when
+    the controller answered, else None.
+    """
+    from fl_studio_mcp.utils.connection import get_connection
+
+    try:
+        result = get_connection().send_command(
+            "ui.showWindow", {"window": "piano_roll", "focus": True}, timeout=1.0
+        )
+    except Exception:  # noqa: BLE001 - best effort only
+        return None
+    if not result.get("success"):
+        return None
+    return result.get("focused_caption")
+
+
 def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
     """Trigger the piano roll script and report what actually happened.
 
@@ -212,6 +234,11 @@ def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
     # With a queued request the script always writes a response, so keep waiting
     # for it until the deadline; only an empty queue is proven by the state export.
     expect_response = bool(_load_request_queue())
+
+    # FL applies ui.setFocused only while its window is the active OS window:
+    # activate first, then focus the piano roll, then send the keystroke.
+    if trigger.activate_window():
+        _focus_piano_roll()
 
     if not trigger.trigger(delay=0.2):
         return {
@@ -294,11 +321,18 @@ def _enrich_pr_context(context: dict) -> dict:
                 }
     except Exception as e:  # noqa: BLE001 - keep the script's context regardless
         context["controller_error"] = str(e)
+    try:
+        focus = conn.send_command("ui.getFocus")
+        if focus.get("success"):
+            context["piano_roll_focused"] = bool(focus.get("focused", {}).get("piano_roll"))
+            context["focused_caption"] = focus.get("caption")
+    except Exception as e:  # noqa: BLE001
+        context.setdefault("controller_error", str(e))
     context["note"] = (
-        "selected_channel is the channel rack selection. An open piano roll only "
-        "follows it when the channel was selected in the FL Studio UI - selecting "
-        "via scripting (fl_select_channel) does not retarget the piano roll. Check "
-        "the piano roll title bar when in doubt."
+        "selected_channel is the channel rack selection; an open piano roll does "
+        "not follow it when selected via scripting, and FL does not report the "
+        "piano roll's target channel. Call fl_open_piano_roll(channel) to make "
+        "the piano roll target a specific channel before writing notes."
     )
     return context
 
