@@ -123,10 +123,16 @@ EOF
 
 # Show current status
 echo "Current configuration status:"
-check_config_status "$CLAUDE_DESKTOP_CONFIG" "Claude Desktop"
-DESKTOP_CONFIGURED=$?
-check_config_status "$CLAUDE_CODE_CONFIG" "Claude Code"
-CODE_CONFIGURED=$?
+if check_config_status "$CLAUDE_DESKTOP_CONFIG" "Claude Desktop"; then
+    DESKTOP_CONFIGURED=0
+else
+    DESKTOP_CONFIGURED=1
+fi
+if check_config_status "$CLAUDE_CODE_CONFIG" "Claude Code"; then
+    CODE_CONFIGURED=0
+else
+    CODE_CONFIGURED=1
+fi
 echo ""
 
 # Menu
