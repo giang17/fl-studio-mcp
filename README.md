@@ -39,7 +39,8 @@ https://github.com/user-attachments/assets/c2b1a5e7-1640-41fa-82bc-18ca7cbae9e8
 - Mute/solo channels
 - Route channels to mixer tracks
 - Trigger MIDI notes in real-time
-- Step sequencer control (get/set grid bits)
+- Step sequencer control (get/set grid bits) with per-step velocity, pan, shift and
+  pitch (FL's graph editor values), plus a deterministic humanize tool
 
 ### Plugin Control
 
@@ -396,8 +397,9 @@ retarget it before writing notes to a specific channel.
 | `fl_route_channel_to_mixer` | Route to mixer track |
 | `fl_get_grid_bit` | Get step sequencer step |
 | `fl_set_grid_bit` | Set step sequencer step |
-| `fl_get_step_sequence` | Get full pattern |
-| `fl_set_step_sequence` | Set full pattern |
+| `fl_get_step_sequence` | Get full pattern; `include_params=True` adds velocity, pan, shift and pitch per step |
+| `fl_set_step_sequence` | Set full pattern, optionally with velocities (0..1), pans (-1..1), shifts (ticks) and pitches (MIDI note) per step; verified by reading back |
+| `fl_humanize_steps` | Jitter step velocities/shifts deterministically (seed), only active steps by default |
 
 ### Plugins
 
@@ -506,6 +508,8 @@ are.
 
 ```text
 "Create a basic kick pattern on channel 0 with kicks on steps 0, 4, 8, and 12"
+"Program a 16-step hi-hat on channel 1: accents on beats 1 and 3, ghost notes in between, a little swing"
+"Humanize the hi-hat velocities by 15 percent, seed 7"
 ```
 
 ### Adding a Melody to Piano Roll
