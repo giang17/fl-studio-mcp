@@ -11,6 +11,24 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
+# Names accepted by fl_save_undo_point; mirrors _UNDO_FLAGS in the controller
+# script (FL's UF_* flags for general.saveUndo).
+UNDO_FLAG_NAMES = (
+    "none",
+    "ee",
+    "pr",
+    "playlist",
+    "knob",
+    "audio_rec",
+    "auto_clip",
+    "pr_marker",
+    "pl_marker",
+    "plugin",
+    "ss_looping",
+    "reset",
+)
+DEFAULT_UNDO_FLAGS = ["pr", "playlist", "knob", "ss_looping"]
+
 
 def register_history_tools(mcp: FastMCP) -> None:
     """Register undo/redo tools with the MCP server."""
@@ -35,11 +53,19 @@ def register_history_tools(mcp: FastMCP) -> None:
                 auto_clip, pr_marker, pl_marker, plugin, ss_looping, reset.
                 Default covers piano roll, playlist, knobs and step sequencer.
         """
+        if isinstance(flags, str):
+            flags = [flags]
+        flags = [str(f).lower() for f in (flags or DEFAULT_UNDO_FLAGS)]
+        unknown = [f for f in flags if f not in UNDO_FLAG_NAMES]
+        if unknown:
+            # Fail loudly: silently ignoring a flag would create an undo point
+            # that does not cover what the caller assumed.
+            return {
+                "error": f"Unknown undo flag(s): {', '.join(unknown)}. "
+                f"Valid flags: {', '.join(UNDO_FLAG_NAMES)}"
+            }
         conn = get_connection()
-        result = conn.send_command(
-            "general.saveUndoPoint", {"name": name, "flags": flags or ["pr", "playlist", "knob", "ss_looping"]}
-        )
-        return result
+        return conn.send_command("general.saveUndoPoint", {"name": name, "flags": flags})
 
     @mcp.tool()
     def fl_undo() -> dict:

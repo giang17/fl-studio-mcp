@@ -26,6 +26,20 @@ RESPONSE_FILE = os.path.join(get_script_dir(), "mcp_response.json")
 STATE_FILE = os.path.join(get_script_dir(), "piano_roll_state.json")
 
 
+def write_json(path, data):
+    """Write JSON in a single call.
+
+    A temp-file + os.replace() approach is NOT possible here: FL's embedded
+    interpreter raises SystemError from os.replace (verified with FL 2026).
+    Serialising first and writing once keeps the window in which the MCP
+    server could read a half-written file as small as possible; the server
+    re-reads a file that does not parse yet.
+    """
+    text = json.dumps(data, indent=2)
+    with open(path, 'w') as f:
+        f.write(text)
+
+
 def export_piano_roll_state():
     """Export current piano roll state to JSON file"""
     notes_data = []
@@ -61,8 +75,7 @@ def export_piano_roll_state():
     }
 
     # Save to file
-    with open(STATE_FILE, 'w') as f:
-        json.dump(export_data, f, indent=2)
+    write_json(STATE_FILE, export_data)
 
     return STATE_FILE
 
@@ -316,7 +329,6 @@ def apply(form=None):
     # Step 3: Write result to response file
     if result:
         try:
-            with open(RESPONSE_FILE, 'w') as f:
-                json.dump(result, f, indent=2)
-        except:
+            write_json(RESPONSE_FILE, result)
+        except Exception:
             pass

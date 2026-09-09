@@ -289,8 +289,13 @@ fl-studio-mcp
 
 1. Open FL Studio and select a channel
 2. Open the Piano Roll (F7 or double-click the channel)
-3. The first time (per project), manually run the script: **Tools > Scripting > ComposeWithLLM**
+3. Once per FL Studio session, manually run the script from the piano roll: **Tools > Scripting > ComposeWithLLM**
 4. After that, the MCP tools will auto-trigger the script
+
+The trigger keystroke only re-runs the *last* piano roll script, so after every
+FL Studio start (and possibly after loading another project) step 3 is needed
+again. The note tools report whether the script actually ran; if the request
+stays queued, repeat step 3 and call the tool again.
 
 > On Linux the auto-trigger uses `xdotool` (X11 sessions only) and sends the
 > same Ctrl+Alt+Y keystroke as on Windows.
@@ -463,7 +468,7 @@ are.
 
 ### Piano Roll script not triggering
 
-1. First time: manually run **Tools > Scripting > ComposeWithLLM** in FL Studio
+1. Once per FL Studio session: manually run **Tools > Scripting > ComposeWithLLM** from the piano roll (the keystroke only re-runs the last script, so this is needed after every FL Studio start)
 2. On macOS: grant Accessibility permissions when prompted
 3. On Windows: the MCP server foregrounds the FL Studio window automatically before sending the hotkey — if FL Studio isn't running or is minimized to the system tray, the trigger can't find it and will fall back to a warning telling you to press the hotkey manually
 4. Try pressing Cmd+Opt+Y (macOS) or Ctrl+Alt+Y (Windows/Linux) manually to confirm the hotkey itself is bound to the script in FL Studio

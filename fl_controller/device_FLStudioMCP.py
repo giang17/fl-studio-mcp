@@ -123,6 +123,18 @@ def _patterns_mod():
     return patterns
 
 
+def _pattern_index_error(patterns, index: int) -> dict | None:
+    """Return an error dict for indices outside 1..patternMax, else None.
+
+    FL silently creates or selects unexpected patterns for out-of-range
+    indices instead of failing, so validate before calling into the API.
+    """
+    max_index = patterns.patternMax()
+    if index < 1 or index > max_index:
+        return {"error": f"Pattern index {index} out of range (1..{max_index})"}
+    return None
+
+
 def handle_patterns_get_count(params: dict) -> dict:
     try:
         patterns = _patterns_mod()
@@ -181,6 +193,9 @@ def handle_patterns_select(params: dict) -> dict:
     try:
         patterns = _patterns_mod()
         index = int(params.get("index", 0))
+        error = _pattern_index_error(patterns, index)
+        if error:
+            return error
         patterns.jumpToPattern(index)
         return {"selected": index, "name": patterns.getPatternName(index)}
     except ImportError:
@@ -216,6 +231,9 @@ def handle_patterns_clone(params: dict) -> dict:
             patterns.clonePattern()
             new_index = patterns.patternNumber()
         else:
+            error = _pattern_index_error(patterns, int(index))
+            if error:
+                return error
             patterns.clonePattern(int(index))
             new_index = patterns.patternNumber()
         return {"cloned_to": new_index, "name": patterns.getPatternName(new_index)}
@@ -230,6 +248,9 @@ def handle_patterns_set_name(params: dict) -> dict:
         patterns = _patterns_mod()
         index = int(params.get("index", 0))
         name = str(params.get("name", ""))
+        error = _pattern_index_error(patterns, index)
+        if error:
+            return error
         patterns.setPatternName(index, name)
         return {"index": index, "name": patterns.getPatternName(index)}
     except ImportError:
@@ -288,9 +309,15 @@ def handle_general_save_undo_point(params: dict) -> dict:
         flags_in = params.get("flags", ["pr", "playlist", "knob", "ss_looping"])
         if isinstance(flags_in, str):
             flags_in = [flags_in]
+        unknown = [str(f) for f in flags_in if str(f).lower() not in _UNDO_FLAGS]
+        if unknown:
+            # Ignoring a flag silently would create an undo point that does not
+            # cover what the caller assumed.
+            return {"error": "Unknown undo flag(s): %s. Valid: %s"
+                    % (", ".join(unknown), ", ".join(_UNDO_FLAGS))}
         flags = 0
         for f in flags_in:
-            flags |= _UNDO_FLAGS.get(str(f).lower(), 0)
+            flags |= _UNDO_FLAGS[str(f).lower()]
         general.saveUndo(name, flags)
         return {"saved": True, "name": name, "flags": flags,
                 "history_pos": general.getUndoHistoryPos(),
