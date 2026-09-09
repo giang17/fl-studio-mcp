@@ -205,6 +205,38 @@ def handle_ui_hide_window(params: dict) -> dict:
         return {"error": str(e)}
 
 
+def handle_ui_notify(params: dict) -> dict:
+    """Put a message in FL's hint panel (bottom left) and read it back.
+
+    ui.showNotification() is deliberately not used: it picks from two fixed
+    strings ("firmware available", "new script version") rather than taking
+    free text, and the API stubs record it crashing FL's scripting
+    environment under Wine - which is where this controller runs.
+
+    FL overwrites the hint panel itself whenever the mouse passes over a
+    control, so the message is short-lived. It does not take focus: the
+    focused form is read before and after and reported.
+    """
+    try:
+        ui = _ui_mod()
+        message = params.get("message")
+        if message is None:
+            return {"error": "message is required"}
+        message = str(message)
+        form_before = ui.getFocusedFormID()
+        ui.setHintMsg(message)
+        shown = ui.getHintMsg()
+        return {
+            "message": message,
+            "shown": shown,
+            "verified": shown == message,
+            "focus_changed": ui.getFocusedFormID() != form_before,
+            "caption": ui.getFocusedFormCaption(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def handle_ui_set_focus(params: dict) -> dict:
     """Give an FL window FL-internal focus (without changing its visibility)."""
     try:
@@ -896,6 +928,8 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_ui_hide_window(params)
     elif action == "ui.setFocus":
         return handle_ui_set_focus(params)
+    elif action == "ui.notify":
+        return handle_ui_notify(params)
     elif action == "pianoroll.open":
         return handle_pianoroll_open(params)
     elif action == "plugins.getColor":

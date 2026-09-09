@@ -80,6 +80,31 @@ def register_ui_tools(mcp: FastMCP) -> None:
         return conn.send_command("ui.setFocus", {"window": window})
 
     @mcp.tool()
+    def fl_notify(message: str) -> dict:
+        """Show a message in FL Studio's hint panel (bottom left of the window).
+
+        The panel is FL's own status line, so the message is short-lived: FL
+        overwrites it as soon as the mouse passes over any control. Use it for
+        immediate feedback ("MCP: 12 notes written"), not for anything that has
+        to stay readable.
+
+        Setting the hint does not change which window has focus; the result
+        says so explicitly. It also returns what FL reports back as the current
+        hint, so a message FL truncated or refused is visible in `shown`.
+
+        FL's other notification call takes only two fixed strings and crashes
+        the scripting environment under Wine, so free text goes through the
+        hint panel alone.
+
+        Args:
+            message: text to display; an empty string clears the panel
+        """
+        if not isinstance(message, str):
+            return {"error": f"message must be a string, got {type(message).__name__}"}
+        conn = get_connection()
+        return conn.send_command("ui.notify", {"message": message})
+
+    @mcp.tool()
     def fl_open_piano_roll(channel: int | None = None) -> dict:
         """Retarget the piano roll to a channel and make it FL's focused window.
 
