@@ -195,3 +195,26 @@ def test_enrich_pr_context_survives_missing_midi_bridge(monkeypatch):
 
     assert enriched["ppq"] == 96
     assert "MIDI port not found" in enriched["controller_error"]
+
+
+def test_queued_request_waits_for_a_late_response(scripts_dir, monkeypatch):
+    # State export first, response noticeably later (slow FL): the response
+    # must still be picked up instead of returning a state-only result.
+    piano_roll._write_request({"action": "add_notes", "notes": [{"midi": 60, "duration": 1}]})
+    response = {"status": "success", "requests_processed": 1, "notes_added": 1, "notes_deleted": 0}
+
+    def slow_script():
+        script_run(scripts_dir, consume=True, export_state=True)
+
+        def finish():
+            time.sleep(0.9)
+            (scripts_dir / "mcp_response.json").write_text(json.dumps(response))
+
+        threading.Thread(target=finish, daemon=True).start()
+
+    install_trigger(monkeypatch, FakeTrigger(slow_script))
+
+    run = piano_roll._run_pr_script(timeout=3.0)
+
+    assert run["ran"] is True
+    assert run["response"] == response

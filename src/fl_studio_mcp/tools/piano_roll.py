@@ -209,6 +209,9 @@ def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
             pass
 
     state_before = _state_mtime()
+    # With a queued request the script always writes a response, so keep waiting
+    # for it until the deadline; only an empty queue is proven by the state export.
+    expect_response = bool(_load_request_queue())
 
     if not trigger.trigger(delay=0.2):
         return {
@@ -232,7 +235,11 @@ def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
             # give the response a short grace period, then accept the export
             # alone as proof (the script writes no response for an empty queue).
             state_changed_at = time.time()
-        elif state_changed_at is not None and time.time() - state_changed_at > 0.5:
+        elif (
+            state_changed_at is not None
+            and not expect_response
+            and time.time() - state_changed_at > 0.5
+        ):
             return {"triggered": True, "ran": True, "response": None, "error": None}
         time.sleep(0.05)
 

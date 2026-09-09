@@ -62,3 +62,27 @@ def test_save_undo_point_rejects_unknown_flags(tools):
     assert "bogus" in result["error"]
     for name in UNDO_FLAG_NAMES:
         assert name in result["error"]
+
+
+def test_save_undo_point_flags_default_only_when_omitted(monkeypatch):
+    import fl_studio_mcp.utils.connection as connection
+
+    sent = []
+
+    class Recorder:
+        def send_command(self, action, params=None, timeout=2.0):
+            sent.append((action, params))
+            return {"success": True, "saved": True}
+
+    monkeypatch.setattr(connection, "get_connection", lambda: Recorder())
+    mcp = RecordingMCP()
+    register_history_tools(mcp)
+    save = mcp.tools["fl_save_undo_point"]
+
+    save()
+    save(flags=[])
+    save(flags="PR")
+
+    assert sent[0][1]["flags"] == ["pr", "playlist", "knob", "ss_looping"]
+    assert sent[1][1]["flags"] == [], "explicit empty list means flag mask 0"
+    assert sent[2][1]["flags"] == ["pr"]

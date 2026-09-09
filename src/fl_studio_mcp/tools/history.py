@@ -53,9 +53,12 @@ def register_history_tools(mcp: FastMCP) -> None:
                 auto_clip, pr_marker, pl_marker, plugin, ss_looping, reset.
                 Default covers piano roll, playlist, knobs and step sequencer.
         """
-        if isinstance(flags, str):
+        if flags is None:
+            flags = DEFAULT_UNDO_FLAGS
+        elif isinstance(flags, str):
             flags = [flags]
-        flags = [str(f).lower() for f in (flags or DEFAULT_UNDO_FLAGS)]
+        # An explicitly empty list is a valid request for flag mask 0 (UF_None).
+        flags = [str(f).lower() for f in flags]
         unknown = [f for f in flags if f not in UNDO_FLAG_NAMES]
         if unknown:
             # Fail loudly: silently ignoring a flag would create an undo point
