@@ -289,8 +289,13 @@ fl-studio-mcp
 
 1. Open FL Studio and select a channel
 2. Open the Piano Roll (F7 or double-click the channel)
-3. The first time, manually run the script: **Tools > Scripting > ComposeWithLLM**
+3. Once per FL Studio session, manually run the script from the piano roll: **Tools > Scripting > ComposeWithLLM**
 4. After that, the MCP tools will auto-trigger the script
+
+The trigger keystroke only re-runs the *last* piano roll script, so after every
+FL Studio start (and possibly after loading another project) step 3 is needed
+again. The note tools report whether the script actually ran; if the request
+stays queued, repeat step 3 and call the tool again.
 
 > On Linux the auto-trigger uses `xdotool` (X11 sessions only) and sends the
 > same Ctrl+Alt+Y keystroke as on Windows.
@@ -371,6 +376,33 @@ fl-studio-mcp
 | `fl_prev_preset` | Previous preset |
 | `fl_get_plugin_color` | Get plugin color |
 
+### Patterns
+
+| Tool | Description |
+|------|-------------|
+| `fl_list_patterns` | List patterns (name, color, length, selection) |
+| `fl_get_current_pattern` | Get the active pattern |
+| `fl_select_pattern` | Select/activate a pattern |
+| `fl_new_pattern` | Switch to the next empty pattern (automation-safe) |
+| `fl_clone_pattern` | Clone a pattern (closes the piano roll - FL behaviour) |
+| `fl_rename_pattern` | Rename a pattern |
+
+Requires FL Studio 2024+ (the `patterns` scripting module); older versions
+get a clear error message.
+
+### Undo / Redo
+
+| Tool | Description |
+|------|-------------|
+| `fl_save_undo_point` | Create a labelled undo checkpoint before batch edits |
+| `fl_undo` | Undo (Ctrl+Z equivalent) |
+| `fl_redo` | Redo |
+| `fl_get_undo_status` | Undo history count/position, project-changed flag |
+
+Note: FL's undo system does not track every scripting mutation (pattern
+renames, for example, are not revertible); user actions and piano-roll edits
+are.
+
 ### Piano Roll
 
 | Tool | Description |
@@ -380,6 +412,7 @@ fl-studio-mcp
 | `fl_delete_notes` | Delete specific notes |
 | `fl_clear_piano_roll` | Clear all notes |
 | `fl_get_piano_roll_state` | Read current piano roll notes |
+| `fl_get_pr_context` | Read piano roll context: time signature, PPQ, snap-to-scale, selected channel, active pattern |
 | `fl_trigger_script` | Manually trigger the FL Studio script |
 | `fl_get_piano_roll_info` | Get piano roll system info |
 | `fl_clear_request_queue` | Cancel pending queued changes |
@@ -435,7 +468,7 @@ fl-studio-mcp
 
 ### Piano Roll script not triggering
 
-1. First time: manually run **Tools > Scripting > ComposeWithLLM** in FL Studio
+1. Once per FL Studio session: manually run **Tools > Scripting > ComposeWithLLM** from the piano roll (the keystroke only re-runs the last script, so this is needed after every FL Studio start)
 2. On macOS: grant Accessibility permissions when prompted
 3. On Windows: the MCP server foregrounds the FL Studio window automatically before sending the hotkey — if FL Studio isn't running or is minimized to the system tray, the trigger can't find it and will fall back to a warning telling you to press the hotkey manually
 4. Try pressing Cmd+Opt+Y (macOS) or Ctrl+Alt+Y (Windows/Linux) manually to confirm the hotkey itself is bound to the script in FL Studio
