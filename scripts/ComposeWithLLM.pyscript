@@ -80,6 +80,72 @@ def export_piano_roll_state():
     return STATE_FILE
 
 
+MARKER_MODE_TIME_SIGNATURE = 8
+
+
+def export_markers():
+    """List the piano roll's markers (time signature, key/scale, ...)."""
+    markers = []
+    for i in range(flp.score.markerCount):
+        marker = flp.score.getMarker(i)
+        entry = {
+            "index": i,
+            "time_ticks": marker.time,
+            "mode": marker.mode,
+            "name": marker.name,
+        }
+        if marker.mode == MARKER_MODE_TIME_SIGNATURE:
+            entry["tsnum"] = marker.tsnum
+            entry["tsden"] = marker.tsden
+        if marker.mode == 12:
+            entry["scale_root"] = marker.scale_root
+            entry["scale_helper"] = marker.scale_helper
+        markers.append(entry)
+    return markers
+
+
+def set_time_signature(request):
+    """Set the pattern's time signature via a time signature marker.
+
+    This is what FL's own "Set time signature..." pattern menu entry does:
+    it places a mode-8 marker at the start of the pattern. An existing time
+    signature marker at the same position is replaced, so the request is
+    idempotent.
+
+    Request format:
+    {"action": "set_time_signature", "numerator": 3, "denominator": 8,
+     "time_ticks": 0}
+    """
+    try:
+        numerator = int(request.get("numerator", 4))
+        denominator = int(request.get("denominator", 4))
+        time_ticks = int(request.get("time_ticks", 0))
+        replaced = 0
+        for i in range(flp.score.markerCount - 1, -1, -1):
+            marker = flp.score.getMarker(i)
+            if marker.mode == MARKER_MODE_TIME_SIGNATURE and marker.time == time_ticks:
+                flp.score.deleteMarker(i)
+                replaced += 1
+        marker = flp.Marker()
+        marker.time = time_ticks
+        marker.mode = MARKER_MODE_TIME_SIGNATURE
+        marker.tsnum = numerator
+        marker.tsden = denominator
+        # FL's own dialog labels the marker with the signature; do the same.
+        marker.name = "%d/%d" % (numerator, denominator)
+        flp.score.addMarker(marker)
+        return {
+            "status": "success",
+            "numerator": numerator,
+            "denominator": denominator,
+            "time_ticks": time_ticks,
+            "replaced": replaced,
+            "markers": export_markers(),
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 def get_piano_roll_context():
     """Report context of the currently open piano roll (read-only)."""
     context = {
@@ -93,6 +159,10 @@ def get_piano_roll_context():
         "snap_scale_helper": flp.score.snap_scale_helper,
         "timeline_selection": list(flp.score.getTimelineSelection()),
     }
+    try:
+        context["markers"] = export_markers()
+    except Exception as e:
+        context["markers_error"] = str(e)
     # The controller-scripting modules are usually importable from piano roll
     # scripts too; they let us report the selected channel / active pattern,
     # which flpianoroll itself does not expose.
@@ -142,6 +212,7 @@ def process_mcp_request():
         total_notes = 0
         notes_deleted = 0
         context_result = None
+        time_signature_result = None
 
         for request in requests:
             action = request.get("action")
@@ -166,6 +237,8 @@ def process_mcp_request():
                 result = add_notes_to_piano_roll(request)
                 if result and result.get("status") == "success":
                     total_notes += result.get("notes_added", 0)
+            elif action == "set_time_signature":
+                time_signature_result = set_time_signature(request)
 
         # Clear the request queue after processing
         with open(REQUEST_FILE, 'w') as f:
@@ -179,6 +252,8 @@ def process_mcp_request():
         }
         if context_result is not None:
             summary["context"] = context_result.get("context", context_result)
+        if time_signature_result is not None:
+            summary["time_signature"] = time_signature_result
         return summary
 
     except Exception as e:
