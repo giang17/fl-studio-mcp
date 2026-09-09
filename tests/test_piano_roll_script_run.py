@@ -169,6 +169,8 @@ def test_enrich_pr_context_uses_controller_and_strips_script_errors(monkeypatch)
                 return {"success": True, "index": 3, "name": "Verse 1", "length_beats": 32}
             if action == "channels.getSelected":
                 return {"success": True, "channel": {"index": 1, "name": "TruePianos", "pan": 0}}
+            if action == "transport.getTempo":
+                return {"success": True, "bpm": 128.0, "ppq": 96, "ppb": 384, "beats_per_bar": 4}
             if action == "ui.getFocus":
                 return {"success": True, "caption": "Piano roll -", "focused": {"piano_roll": True}}
             raise AssertionError(action)
@@ -188,6 +190,8 @@ def test_enrich_pr_context_uses_controller_and_strips_script_errors(monkeypatch)
     assert enriched["selected_channel"] == {"index": 1, "name": "TruePianos"}
     assert "selected_channel_error" not in enriched
     assert "current_pattern_error" not in enriched
+    assert enriched["tempo_bpm"] == 128.0
+    assert "controller_error" not in enriched
     assert enriched["piano_roll_focused"] is True
     assert enriched["focused_caption"] == "Piano roll -"
     assert "fl_open_piano_roll" in enriched["note"]

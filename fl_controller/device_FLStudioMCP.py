@@ -391,6 +391,12 @@ def _general_mod():
     return general
 
 
+def _midi_mod():
+    """Lazily import the midi module (REC event ids and flags)."""
+    import midi  # noqa: PLC0415
+    return midi
+
+
 def handle_general_undo(params: dict) -> dict:
     try:
         general = _general_mod()
@@ -496,6 +502,10 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_transport_set_loop_mode(params)
     elif action == "transport.setPlaybackSpeed":
         return handle_transport_set_playback_speed(params)
+    elif action == "transport.getTempo":
+        return handle_transport_get_tempo(params)
+    elif action == "transport.setTempo":
+        return handle_transport_set_tempo(params)
 
     # Mixer commands
     elif action == "mixer.getTrackCount":
@@ -689,6 +699,71 @@ def handle_transport_set_playback_speed(params: dict) -> dict:
     speed = params.get("speed", 1.0)
     transport.setPlaybackSpeed(speed)
     return {"speed": speed}
+
+
+# FL Studio's project tempo range; processRECEvent clamps out-of-range values
+# silently, so reject them here instead.
+TEMPO_MIN_BPM = 10.0
+TEMPO_MAX_BPM = 522.0
+# Both mixer.getCurrentTempo() and the REC_Tempo event work in milli-BPM:
+# 90 BPM is 90000.
+TEMPO_SCALE = 1000
+
+
+def _read_tempo() -> dict:
+    """Read tempo and timebase, deriving the time signature numerator."""
+    general = _general_mod()
+    raw = mixer.getCurrentTempo()
+    ppq = general.getRecPPQ()
+    ppb = general.getRecPPB()
+    info = {
+        "bpm": round(float(raw) / TEMPO_SCALE, 3),
+        "raw_tempo": raw,
+        "ppq": ppq,
+        "ppb": ppb,
+    }
+    # PPB is PPQ times the beats in a bar, so it yields the numerator of the
+    # project time signature (playlist time signature markers are ignored, see
+    # the getRecPPB docs). FL exposes no denominator to controller scripts; the
+    # piano roll script reports it (flp.score.tsden) via fl_get_pr_context.
+    if ppq:
+        info["beats_per_bar"] = ppb // ppq
+    return info
+
+
+def handle_transport_get_tempo(params: dict) -> dict:
+    """Report tempo, timebase and the time signature numerator."""
+    try:
+        return _read_tempo()
+    except ImportError:
+        return {"error": "general module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_transport_set_tempo(params: dict) -> dict:
+    """Set the project tempo through the REC_Tempo event and read it back."""
+    try:
+        bpm = float(params.get("bpm"))
+    except (TypeError, ValueError):
+        return {"error": "bpm must be a number"}
+    if not TEMPO_MIN_BPM <= bpm <= TEMPO_MAX_BPM:
+        return {"error": "bpm must be between %g and %g" % (TEMPO_MIN_BPM, TEMPO_MAX_BPM)}
+    try:
+        general = _general_mod()
+        midi = _midi_mod()
+        general.processRECEvent(
+            midi.REC_Tempo,
+            int(round(bpm * TEMPO_SCALE)),
+            midi.REC_Control | midi.REC_UpdateControl,
+        )
+        result = _read_tempo()
+        result["requested_bpm"] = bpm
+        return result
+    except ImportError:
+        return {"error": "general or midi module not available"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # =============================================================================
