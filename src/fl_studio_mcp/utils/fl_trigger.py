@@ -18,8 +18,9 @@ TRIGGER_DELAY = 2.0
 class FLStudioTrigger:
     """Handles triggering FL Studio's Piano Roll script via keystrokes.
 
-    The trigger sends Cmd+Opt+Y (macOS) or Ctrl+Alt+Y (Windows) to FL Studio,
-    which executes the ComposeWithLLM.pyscript to process pending JSON requests.
+    The trigger sends Cmd+Opt+Y on macOS or Ctrl+Alt+Y on Windows and Linux/X11
+    (via xdotool) to FL Studio, which executes the ComposeWithLLM.pyscript to
+    process pending JSON requests.
     """
 
     def __init__(self) -> None:
