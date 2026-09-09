@@ -13,9 +13,14 @@ Measured on FL Studio 2026 (26.1.5) under Wine/X11:
 * Clicking it opens a 185x336 popup. `Home` marks "File", `Down` twice moves to
   "Tools" and `Right` opens its submenu (434x423).
 * The submenu has two columns, "Built-in" and "Scripts". `Home` marks the first
-  built-in entry; `Right` jumps to the first entry of the Scripts column ("Run
-  last script again"), followed by "Open script folder..." and then the
-  installed scripts in alphabetical order. `Down` skips the separator.
+  built-in entry and `Right` jumps into the Scripts column, which starts with
+  "Run last script again" and "Open script folder...", then lists the installed
+  scripts alphabetically. `End` marks the last of them.
+* Counting from the top is wrong: right after an FL Studio start - exactly when
+  this is needed - "Run last script again" is greyed out and the keyboard skips
+  it, which shifts every entry up by one. Counting from the end does not care:
+  the tail of the column is always a script. (Measured: counting from the top
+  started *Euclidean*, one entry past ComposeWithLLM.)
 * `Return` runs the marked entry. ComposeWithLLM runs without any UI, so a
   window appearing afterwards means a *different* script was started.
 
@@ -44,10 +49,6 @@ DEFAULT_MENU_OFFSET = (17, 15)
 
 # "Tools" is the third entry of the piano roll menu (Home, then Down twice).
 TOOLS_ENTRY_FROM_TOP = 2
-
-# The Scripts column starts with "Run last script again" and "Open script
-# folder..." before the installed scripts.
-SCRIPTS_COLUMN_HEADER_ENTRIES = 2
 
 # FL reads piano roll scripts from a plain file or from a folder holding a
 # script of the same name (that is how downloaded scripts are shipped).
@@ -143,8 +144,13 @@ def installed_scripts() -> list[str]:
     return sorted(seen, key=str.lower)
 
 
-def script_menu_index(script_name: str) -> int:
-    """How many `Down` presses lead from the Scripts column's top to the script."""
+def script_menu_steps(script_name: str) -> int:
+    """How many `Up` presses lead from the end of the Scripts column to the script.
+
+    Counted from the end because the entries above the scripts change state:
+    "Run last script again" is greyed out until a script has run, and a greyed
+    out entry is skipped by the keyboard.
+    """
     scripts = installed_scripts()
     try:
         position = scripts.index(script_name)
@@ -154,7 +160,7 @@ def script_menu_index(script_name: str) -> int:
             f"{script_name}{SCRIPT_SUFFIX} in one of: "
             + ", ".join(str(d) for d in script_dirs())
         ) from None
-    return SCRIPTS_COLUMN_HEADER_ENTRIES + position
+    return len(scripts) - 1 - position
 
 
 class PRScriptMenu:
@@ -173,14 +179,25 @@ class PRScriptMenu:
             )
         return window
 
-    def _close_menus(self, levels: int) -> None:
-        """Best effort: leave no popup behind after a failed run."""
-        for _ in range(levels):
-            try:
+    def _close_window(self, window: XWindow) -> None:
+        """Escape one window, and only while it is still there.
+
+        Escape outside a popup closes whatever FL has focused - a blind second
+        press closes the piano roll itself - so it is aimed and verified. A
+        popup menu carries no title and holds the keyboard grab anyway;
+        activating one is not just pointless but hangs, because the window
+        manager never made it active (`windowactivate --sync` waits forever).
+        """
+        try:
+            for _ in range(2):
+                if all(w.id != window.id for w in self.x11.fl_windows()):
+                    return
+                if window.name:
+                    self.x11.activate(window)
                 self.x11.key("Escape")
-                time.sleep(0.1)
-            except Exception:  # noqa: BLE001 - already failing, do not mask the cause
-                return
+                time.sleep(0.2)
+        except Exception:  # noqa: BLE001 - already failing, do not mask the cause
+            return
 
     def _await_script(self, ran, known_ids: set[str], timeout: float) -> None:
         """Wait for proof that the script ran, or explain what happened instead."""
@@ -193,7 +210,7 @@ class PRScriptMenu:
                 None,
             )
             if stray is not None:
-                self._close_menus(2)
+                self._close_window(stray)
                 raise PRScriptMenuError(
                     f"a window opened instead of the script running ({stray.name or 'untitled'}, "
                     f"{stray.width}x{stray.height}); the menu entry was probably a different "
@@ -217,7 +234,7 @@ class PRScriptMenu:
             raise PRScriptMenuError(self.x11.unavailable_reason or "X11 is unavailable")
 
         offset = _menu_offset()
-        steps = script_menu_index(script_name)
+        steps = script_menu_steps(script_name)
         piano_roll = self._piano_roll_window()
 
         before_menus = self.x11.window_ids()
@@ -239,16 +256,19 @@ class PRScriptMenu:
         self.x11.key("Right")
         tools = self.x11.wait_for_new_window(with_menu, timeout=2.0)
         if tools is None:
-            self._close_menus(1)
+            self._close_window(menu)
             raise PRScriptMenuError("the Tools submenu did not open")
 
-        # Home marks the first built-in entry, Right jumps to the Scripts column.
+        # Home marks the first built-in entry, Right jumps into the Scripts
+        # column and End to its last script; from there the script is counted
+        # upwards, which no greyed out entry above can shift.
         self.x11.key("Home")
         self.x11.key("Right")
+        self.x11.key("End")
         for _ in range(steps):
-            self.x11.key("Down")
+            self.x11.key("Up")
 
         known_ids = self.x11.window_ids()
         self.x11.key("Return")
         self._await_script(ran, known_ids, timeout)
-        return {"script": script_name, "menu_steps": steps}
+        return {"script": script_name, "menu_steps_from_end": steps}

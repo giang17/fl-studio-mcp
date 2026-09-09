@@ -79,17 +79,19 @@ class FakeX11:
             if self.opens_on_return is not None:
                 self.windows.append(self.opens_on_return)
         elif keys == ("Escape",):
+            # A popup swallows Escape first; otherwise FL closes whatever is
+            # focused, which is what makes a blind Escape dangerous.
             if TOOLS in self.windows:
                 self.windows.remove(TOOLS)
             elif MENU in self.windows:
                 self.windows.remove(MENU)
-
-    @property
-    def scripts_column_steps(self) -> int:
-        """`Down` presses after the jump into the Scripts column."""
-        jump = len(self.keys) - 1 - self.keys[::-1].index("Right")
-        return self.keys[jump:].count("Down")
-
+            else:
+                focused = next(
+                    (w for w in self.windows if self.activated and w.id == self.activated[-1]),
+                    None,
+                )
+                if focused is not None:
+                    self.windows.remove(focused)
 
 @pytest.fixture
 def scripts(tmp_path, monkeypatch):
@@ -126,17 +128,19 @@ def test_scripts_are_listed_the_way_fl_shows_them(scripts):
     ]
 
 
-def test_menu_index_counts_the_two_fixed_entries_first(scripts):
-    # "Run last script again", "Open script folder...", then Arpeggiator.
-    assert pr_script_menu.script_menu_index("Arpeggiator") == 2
-    assert pr_script_menu.script_menu_index("ComposeWithLLM") == 3
+def test_menu_steps_are_counted_from_the_end_of_the_scripts_column(scripts):
+    """The entries above the scripts change state, the tail never does."""
+    # Arpeggiator, ComposeWithLLM, Euclidean, Humanize, WiseLabs...
+    assert pr_script_menu.script_menu_steps("WiseLabs probability sequencer") == 0
+    assert pr_script_menu.script_menu_steps("ComposeWithLLM") == 3
+    assert pr_script_menu.script_menu_steps("Arpeggiator") == 4
 
 
 def test_sorting_ignores_case(scripts):
     (scripts["user"] / "aaa test.pyscript").write_text("# lowercase")
 
     assert pr_script_menu.installed_scripts()[0] == "aaa test"
-    assert pr_script_menu.script_menu_index("ComposeWithLLM") == 4
+    assert pr_script_menu.script_menu_steps("ComposeWithLLM") == 3
 
 
 def test_backup_files_are_not_menu_entries(scripts):
@@ -163,7 +167,7 @@ def test_the_same_script_in_two_directories_is_refused(scripts):
 
 def test_a_missing_script_names_the_directories(scripts):
     with pytest.raises(PRScriptMenuError, match="not installed as a piano roll script"):
-        pr_script_menu.script_menu_index("NotThere")
+        pr_script_menu.script_menu_steps("NotThere")
 
 
 def test_run_script_walks_the_menu_and_confirms_the_run(scripts):
@@ -171,19 +175,18 @@ def test_run_script_walks_the_menu_and_confirms_the_run(scripts):
 
     result = PRScriptMenu(x11).run_script("ComposeWithLLM", lambda: True)
 
-    assert result == {"script": "ComposeWithLLM", "menu_steps": 3}
+    assert result == {"script": "ComposeWithLLM", "menu_steps_from_end": 3}
     assert x11.activated == [PIANO_ROLL.id]
     assert x11.clicks == [
         (PIANO_ROLL.x + DEFAULT_MENU_OFFSET[0], PIANO_ROLL.y + DEFAULT_MENU_OFFSET[1])
     ]
-    # Home + Down x2 + Right opens Tools; Home + Right jumps to the Scripts
-    # column, then three Downs reach ComposeWithLLM.
+    # Home + Down x2 + Right opens Tools; Home + Right jumps into the Scripts
+    # column, End marks its last script, three Ups reach ComposeWithLLM.
     assert x11.keys == [
         "Home", "Down", "Down", "Right",
-        "Home", "Right", "Down", "Down", "Down",
+        "Home", "Right", "End", "Up", "Up", "Up",
         "Return",
     ]  # fmt: skip
-    assert x11.scripts_column_steps == 3
 
 
 def test_menu_offset_can_be_overridden(scripts, monkeypatch):
@@ -228,6 +231,9 @@ def test_a_missing_tools_submenu_closes_the_menu_again(scripts):
 
     assert "Escape" in x11.keys
     assert MENU not in x11.windows
+    # A popup is never activated: it holds the keyboard grab, and
+    # `windowactivate --sync` on a window the WM never activates hangs.
+    assert x11.activated == [PIANO_ROLL.id]
 
 
 def test_a_dialog_after_return_means_the_wrong_entry(scripts):
@@ -238,7 +244,11 @@ def test_a_dialog_after_return_means_the_wrong_entry(scripts):
     with pytest.raises(PRScriptMenuError, match="a window opened instead"):
         PRScriptMenu(x11).run_script("ComposeWithLLM", lambda: False, timeout=0.3)
 
-    assert x11.keys.count("Escape") == 2
+    # Aimed at the dialog and stopped once it was gone: a blind second Escape
+    # would close the piano roll itself.
+    assert x11.keys.count("Escape") == 1
+    assert x11.activated[-1] == DIALOG.id
+    assert DIALOG not in x11.windows
 
 
 def test_a_silent_run_is_not_reported_as_success(scripts):

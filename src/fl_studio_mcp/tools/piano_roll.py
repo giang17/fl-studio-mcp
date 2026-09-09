@@ -249,13 +249,13 @@ def _pr_script_menu_info() -> dict:
     from fl_studio_mcp.utils.pr_script_menu import (
         PRScriptMenuError,
         script_dirs,
-        script_menu_index,
+        script_menu_steps,
     )
 
     info: dict = {"script": PR_SCRIPT_NAME, "auto_start": _auto_bootstrap_enabled()}
     try:
         info["script_dirs"] = [str(d) for d in script_dirs()]
-        info["menu_steps"] = script_menu_index(PR_SCRIPT_NAME)
+        info["menu_steps_from_end"] = script_menu_steps(PR_SCRIPT_NAME)
     except PRScriptMenuError as e:
         info["error"] = str(e)
     return info
