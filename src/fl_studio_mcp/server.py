@@ -46,7 +46,8 @@ FL Studio must be running with the FLStudioMCP MIDI controller enabled.
 Available tool categories:
 - Transport: Play, stop, record, tempo, position control
 - Mixer: Volume, pan, mute, solo, track management
-- Channels: Channel info, note triggering, step sequencer
+- Channels: Channel info, note triggering, step sequencer (grid plus
+  velocity/pan/shift/pitch per step, humanize)
 - Plugins: Parameter control, preset navigation (cannot load new plugins)
 - Playlist: Track names/colors/mute/solo, time markers, song position
   (cannot place clips in the playlist)
@@ -56,8 +57,10 @@ Important limitations:
 2. Pattern delete/insert/move/transpose/split have no API; the tools drive
    FL's shortcuts and pattern menu (Linux/X11 only) and verify afterwards
 3. Note triggering (fl_trigger_note) is real-time only - notes won't persist
-   unless FL Studio is recording. Use step sequencer (fl_set_grid_bit) for
-   persistent drum patterns.
+   unless FL Studio is recording. Use the step sequencer (fl_set_step_sequence
+   with velocities/pans/shifts/pitches, fl_set_grid_bit) for persistent drum
+   patterns; setting the grid resets the steps' values, so pass everything
+   in one call.
 """,
 )
 

@@ -846,6 +846,10 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_channels_get_step_sequence(params)
     elif action == "channels.setStepSequence":
         return handle_channels_set_step_sequence(params)
+    elif action == "channels.getStepParams":
+        return handle_channels_get_step_params(params)
+    elif action == "channels.setStepParams":
+        return handle_channels_set_step_params(params)
 
     # Plugin commands
     elif action == "plugins.isValid":
@@ -1432,6 +1436,147 @@ def handle_channels_set_step_sequence(params: dict) -> dict:
     }
 
 
+# Step parameter types of channels.setStepParameterByIndex / getCurrentStepParam
+# (midi.pPitch, pVelocity, pPan, pShift, ...). Kept literal: the values are
+# part of the FL API contract and the handlers must not depend on the midi
+# module for a table lookup.
+STEP_PARAMS = {
+    "pitch": 0,      # MIDI note, default 60
+    "velocity": 1,   # 0..127, default 100
+    "release": 2,    # 0..127, default 64
+    "fine_pitch": 3, # cents 0..240, default 120
+    "pan": 4,        # 0..127, default 64 = centre
+    "mod_x": 5,      # 0..127, default 64
+    "mod_y": 6,      # 0..127, default 64
+    "shift": 7,      # ticks 0..PPQ/4 (one step), default 0
+}
+
+
+def _step_ticks() -> int:
+    """Ticks per step: FL's step sequencer runs 4 steps per beat."""
+    return _general_mod().getRecPPQ() // 4
+
+
+def _step_param_max(name: str, step_ticks: int) -> int:
+    if name == "shift":
+        # Verified live (FL 2026): a note one tick before the next step's
+        # slot already counts as that next step for setGridBit and masks its
+        # note when reading, so the last usable shift is step_ticks - 2.
+        return step_ticks - 2
+    if name == "fine_pitch":
+        return 240
+    return 127
+
+
+def _step_param_names(params: dict) -> "list | dict":
+    names = params.get("params", ["velocity", "pan", "shift"])
+    if isinstance(names, str):
+        names = [names]
+    unknown = [str(n) for n in names if str(n) not in STEP_PARAMS]
+    if unknown:
+        return {"error": "Unknown step parameter(s): %s. Valid: %s"
+                % (", ".join(unknown), ", ".join(STEP_PARAMS))}
+    return [str(n) for n in names]
+
+
+def handle_channels_get_step_params(params: dict) -> dict:
+    """Read grid bits plus per-step parameters (graph editor values) of a channel.
+
+    Values are FL's raw integers (velocity/pan 0..127, shift as the absolute
+    tick position of the note); the server normalises them.
+    """
+    channel = params.get("channel", 0)
+    steps = int(params.get("steps", 16))
+    names = _step_param_names(params)
+    if isinstance(names, dict):
+        return names
+    if steps < 1:
+        return {"error": "steps must be >= 1"}
+    try:
+        out = {
+            "steps": [channels.getGridBit(channel, i, True) == 1 for i in range(steps)],
+            "step_ticks": _step_ticks(),
+            "channel_name": channels.getChannelName(channel, True),
+        }
+        # Raw FL values. For "shift" FL reports the absolute tick position
+        # of the first note it finds from one tick before the step's slot on;
+        # -1 means no note. The server turns that into per-step values.
+        for name in names:
+            param = STEP_PARAMS[name]
+            out[name] = [int(channels.getCurrentStepParam(channel, i, param, True))
+                         for i in range(steps)]
+        return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_channels_set_step_params(params: dict) -> dict:
+    """Write per-step parameters (and optionally grid bits) on the current pattern.
+
+    params["values"] maps parameter names to lists of raw integers, one per
+    step from step 0; "shift" is relative to the step (0..step_ticks-2) and
+    written as the absolute tick position FL expects. All lists are validated
+    before anything is written, so a bad value leaves the pattern untouched.
+    Steps that are off are skipped (FL ignores such writes anyway).
+    """
+    channel = params.get("channel", 0)
+    values = params.get("values", {}) or {}
+    bits = params.get("steps")
+    if not isinstance(values, dict):
+        return {"error": "values must be a mapping of parameter name -> list"}
+    names = _step_param_names({"params": list(values)})
+    if isinstance(names, dict):
+        return names
+    try:
+        step_ticks = _step_ticks()
+        for name in names:
+            vals = values[name]
+            if not isinstance(vals, list):
+                return {"error": "%s must be a list" % name}
+            top = _step_param_max(name, step_ticks)
+            for i, v in enumerate(vals):
+                if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v > top:
+                    return {"error": "%s[%d] = %r out of range 0..%d" % (name, i, v, top)}
+        pattern = _patterns_mod().patternNumber()
+        if bits is not None:
+            for i, value in enumerate(bits):
+                channels.setGridBit(channel, i, 1 if value else 0, True)
+        written = {}
+        skipped = []
+        for name in names:
+            param = STEP_PARAMS[name]
+            count = 0
+            for i, v in enumerate(values[name]):
+                if not channels.getGridBit(channel, i, True):
+                    # FL ignores parameter writes on steps that are off.
+                    if i not in skipped:
+                        skipped.append(i)
+                    continue
+                if name == "shift":
+                    v = i * step_ticks + v
+                channels.setStepParameterByIndex(channel, pattern, i, param, v, True)
+                count += 1
+            written[name] = count
+        # Refresh the graph editor if it is open; the value is stored either way.
+        refresh = getattr(channels, "updateGraphEditor", None)
+        if refresh is not None:
+            try:
+                refresh()
+            except Exception:
+                pass
+        return {
+            "pattern": pattern,
+            "written": written,
+            "skipped_off_steps": skipped,
+            "step_ticks": step_ticks,
+            "channel_name": channels.getChannelName(channel, True),
+        }
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # =============================================================================
 # Plugin Handlers
 # =============================================================================
@@ -1624,3 +1769,4 @@ def handle_plugins_get_color(params: dict) -> dict:
         color = plugins.getColor(index, -1, use_global)
 
     return {"color": hex(color)}
+
