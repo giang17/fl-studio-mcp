@@ -350,18 +350,64 @@ def _midi_to_note_name(midi: int) -> str:
     return f"{note_name}{octave}"
 
 
-def _get_trigger_info(auto_trigger: bool) -> str:
+def _hint_after_run(run: dict) -> str | None:
+    """Summarise a script run in FL's hint panel. Returns a problem, or None.
+
+    The hint is set from here and not from the piano roll script: `ui` is not
+    importable in FL's piano roll runtime (FL 2026 under Wine answers "No
+    module named 'ui'"), which is the same reason _enrich_pr_context fetches
+    the pattern over MIDI. The counts come from the script's own response, so
+    they say what was really written.
+
+    FL's hint font renders the arrow and umlauts but not a check mark, which
+    comes out as a placeholder box - keep the text to arrows and letters.
+    """
+    from fl_studio_mcp.utils.connection import get_connection
+
+    response = run.get("response") or {}
+    added = response.get("notes_added") or 0
+    deleted = response.get("notes_deleted") or 0
+    parts = []
+    if added:
+        parts.append(f"{added} notes")
+    if deleted:
+        parts.append(f"{deleted} deleted")
+    text = "MCP: " + (", ".join(parts) if parts else "no changes")
+    try:
+        conn = get_connection()
+        pattern = conn.send_command("patterns.getCurrent")
+        if pattern.get("success") and pattern.get("name"):
+            text += f" \u2192 {pattern['name']}"
+        result = conn.send_command("ui.notify", {"message": text})
+        if not result.get("success"):
+            return result.get("error") or "the controller refused the hint"
+    except Exception as e:  # noqa: BLE001 - the notes are written either way
+        return str(e)
+    return None
+
+
+def _get_trigger_info(auto_trigger: bool, hint: bool = False) -> str:
     """Run the piano roll script (if requested) and return a status suffix."""
     if not auto_trigger:
         return ""
-    return " " + _describe_run(_run_pr_script())
+    run = _run_pr_script()
+    info = " " + _describe_run(run)
+    if hint and run.get("ran"):
+        if problem := _hint_after_run(run):
+            info += f" Hint not shown: {problem}"
+    return info
 
 
 def register_piano_roll_tools(mcp: FastMCP) -> None:
     """Register piano roll tools with the MCP server."""
 
     @mcp.tool()
-    def fl_send_notes(notes: list[dict], mode: str = "add", auto_trigger: bool = True) -> str:
+    def fl_send_notes(
+        notes: list[dict],
+        mode: str = "add",
+        auto_trigger: bool = True,
+        hint: bool = True,
+    ) -> str:
         """Add or replace notes in the FL Studio piano roll.
 
         This creates persistent notes in the currently open piano roll pattern.
@@ -375,6 +421,11 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
                    - velocity (float, optional): Velocity 0.0-1.0 (default 0.8)
             mode: "add" to add notes, "replace" to clear existing notes first
             auto_trigger: Whether to automatically trigger FL Studio (default True)
+            hint: Show "MCP: N notes" plus the pattern name in FL's hint
+                  panel once the script has run (default True). The count
+                  comes from the script's response, so it reflects what was
+                  really written; FL overwrites the panel on the next
+                  mouse-over.
 
         Example notes:
             [
@@ -409,7 +460,7 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
 
         _write_request(requests)
 
-        trigger_info = _get_trigger_info(auto_trigger)
+        trigger_info = _get_trigger_info(auto_trigger, hint)
         note_count = len(notes)
         note_summary = ", ".join(
             f"{_midi_to_note_name(n['midi'])}@{n.get('time', 0)}" for n in notes[:5]

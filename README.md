@@ -425,6 +425,7 @@ retarget it before writing notes to a specific channel.
 | `fl_hide_window` | Hide an FL window |
 | `fl_focus_window` | Give an FL window FL-internal focus |
 | `fl_open_piano_roll` | Retarget the piano roll to a channel (hide, select, show) and focus it - use before `fl_send_notes` |
+| `fl_notify` | Show a message in FL's hint panel (bottom left); short-lived, FL overwrites it on the next mouse-over |
 
 ### Patterns
 

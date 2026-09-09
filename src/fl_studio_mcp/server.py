@@ -51,12 +51,18 @@ Available tool categories:
 - Plugins: Parameter control, preset navigation (cannot load new plugins)
 - Playlist: Track names/colors/mute/solo, time markers, song position
   (cannot place clips in the playlist)
+- Windows: Visibility and FL-internal focus, plus fl_notify for a message in
+  FL's hint panel
 
 Important limitations:
 1. Cannot load new VST/AU plugins - only control existing ones
 2. Pattern delete/insert/move/transpose/split have no API; the tools drive
    FL's shortcuts and pattern menu (Linux/X11 only) and verify afterwards
-3. Note triggering (fl_trigger_note) is real-time only - notes won't persist
+3. Feedback in FL goes through the hint panel (fl_notify, and the hint
+   fl_send_notes sets after a piano roll run). FL overwrites it on the next
+   mouse-over, and ui.showNotification is unusable: two fixed strings, and
+   it crashes FL's scripting environment under Wine
+4. Note triggering (fl_trigger_note) is real-time only - notes won't persist
    unless FL Studio is recording. Use the step sequencer (fl_set_step_sequence
    with velocities/pans/shifts/pitches, fl_set_grid_bit) for persistent drum
    patterns; setting the grid resets the steps' values, so pass everything
