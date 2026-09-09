@@ -514,6 +514,9 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
         if not run["ran"]:
             # Do not let context requests pile up for the next successful trigger.
             _remove_queued_actions("get_context")
+            if run["triggered"]:
+                # The generic hint mentions the queue; this request is gone.
+                return {"error": PR_SCRIPT_NOT_RUN_HINT}
             return {"error": run["error"]}
 
         response = run.get("response") or {}
