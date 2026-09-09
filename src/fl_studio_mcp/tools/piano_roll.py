@@ -14,6 +14,7 @@ Communication flow:
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -194,13 +195,113 @@ def _focus_piano_roll() -> str | None:
     return result.get("focused_caption")
 
 
-def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
+# The script FL runs for us; also the name of its entry in FL's Scripts menu.
+PR_SCRIPT_NAME = "ComposeWithLLM"
+
+
+def _auto_bootstrap_enabled() -> bool:
+    """Whether a dead trigger may start the script from FL's menu by itself."""
+    return os.environ.get("FL_STUDIO_MCP_AUTO_BOOTSTRAP", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+    )
+
+
+def _start_pr_script_from_menu(timeout: float = PR_SCRIPT_TIMEOUT) -> str | None:
+    """Start ComposeWithLLM from the piano roll's menu (Linux/X11 only).
+
+    This is what makes Ctrl+Alt+Y work at all: FL greys out "run last script
+    again" until a script has been started once per session. Returns None on
+    success, else the reason it did not happen. An undo point is saved first,
+    best effort, so a mis-started script stays revertible.
+    """
+    from fl_studio_mcp.utils.pr_script_menu import PRScriptMenu, PRScriptMenuError
+
+    state_before = _state_mtime()
+    try:
+        from fl_studio_mcp.utils.connection import get_connection
+
+        get_connection().send_command(
+            "general.saveUndoPoint", {"name": "MCP: start piano roll script"}, timeout=1.0
+        )
+    except Exception:  # noqa: BLE001 - an undo point is a courtesy, not a precondition
+        pass
+
+    try:
+        PRScriptMenu().run_script(
+            PR_SCRIPT_NAME, lambda: _state_mtime() != state_before, timeout=timeout
+        )
+    except PRScriptMenuError as e:
+        return str(e)
+    except Exception as e:  # noqa: BLE001 - xdotool/X11 trouble must stay a message
+        return f"{type(e).__name__}: {e}"
+    return None
+
+
+def _pr_script_menu_info() -> dict:
+    """Where the menu automation would click, or why it cannot say.
+
+    Reported by fl_get_piano_roll_info: the script directories FL collects its
+    Scripts column from and the resulting position of ComposeWithLLM, so a
+    refusal to click can be understood without guessing.
+    """
+    from fl_studio_mcp.utils.pr_script_menu import (
+        PRScriptMenuError,
+        script_dirs,
+        script_menu_steps,
+    )
+
+    info: dict = {"script": PR_SCRIPT_NAME, "auto_start": _auto_bootstrap_enabled()}
+    try:
+        info["script_dirs"] = [str(d) for d in script_dirs()]
+        info["menu_steps_from_end"] = script_menu_steps(PR_SCRIPT_NAME)
+    except PRScriptMenuError as e:
+        info["error"] = str(e)
+    return info
+
+
+def _await_script_evidence(
+    state_before: object, expect_response: bool, timeout: float
+) -> dict | None:
+    """Wait for proof that the script ran; None when nothing happened in time.
+
+    The script exports the state before it writes the response, so a changed
+    export is accepted on its own once the response has had a grace period -
+    for an empty queue the script writes no response at all.
+    """
+    deadline = time.time() + timeout
+    state_changed_at: float | None = None
+    while time.time() < deadline:
+        response = _try_read_response()
+        if response is not None:
+            return {"triggered": True, "ran": True, "response": response, "error": None}
+        if state_changed_at is None and _state_mtime() != state_before:
+            state_changed_at = time.time()
+        elif (
+            state_changed_at is not None
+            and not expect_response
+            and time.time() - state_changed_at > 0.5
+        ):
+            return {"triggered": True, "ran": True, "response": None, "error": None}
+        time.sleep(0.05)
+
+    if state_changed_at is not None:
+        return {"triggered": True, "ran": True, "response": None, "error": None}
+    return None
+
+
+def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT, bootstrap: bool = True) -> dict:
     """Trigger the piano roll script and report what actually happened.
 
     The old behaviour slept for a fixed delay and reported success whenever the
     keystroke could be sent, even if nothing in FL Studio reacted. This waits
     for evidence instead: the script's response file or, failing that, the
     state export it always writes.
+
+    When the keystroke reaches FL but nothing runs - the usual state right
+    after an FL Studio start - the script is started once from FL's menu and
+    that run itself processes the queued request (`bootstrap`).
 
     Returns a dict with:
     - triggered: the keystroke was sent
@@ -251,27 +352,27 @@ def _run_pr_script(timeout: float = PR_SCRIPT_TIMEOUT) -> dict:
             ),
         }
 
-    deadline = time.time() + timeout
-    state_changed_at: float | None = None
-    while time.time() < deadline:
-        response = _try_read_response()
-        if response is not None:
-            return {"triggered": True, "ran": True, "response": response, "error": None}
-        if state_changed_at is None and _state_mtime() != state_before:
-            # The script exports the state before it writes the response;
-            # give the response a short grace period, then accept the export
-            # alone as proof (the script writes no response for an empty queue).
-            state_changed_at = time.time()
-        elif (
-            state_changed_at is not None
-            and not expect_response
-            and time.time() - state_changed_at > 0.5
-        ):
-            return {"triggered": True, "ran": True, "response": None, "error": None}
-        time.sleep(0.05)
+    result = _await_script_evidence(state_before, expect_response, timeout)
+    if result is not None:
+        return result
 
-    if state_changed_at is not None:
-        return {"triggered": True, "ran": True, "response": None, "error": None}
+    # Nothing reacted: FL has no "last script" yet. Start it from the menu -
+    # that run reads the same request file, so the queue is served by it.
+    if bootstrap and _auto_bootstrap_enabled():
+        problem = _start_pr_script_from_menu(timeout=timeout)
+        if problem is None:
+            result = _await_script_evidence(state_before, expect_response, timeout)
+            if result is not None:
+                result["bootstrapped"] = True
+                return result
+        else:
+            return {
+                "triggered": True,
+                "ran": False,
+                "response": None,
+                "error": f"{_not_run_error()} Starting it from FL's menu failed: {problem}",
+            }
+
     return {"triggered": True, "ran": False, "response": None, "error": _not_run_error()}
 
 
@@ -632,6 +733,42 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
         return _enrich_pr_context(context)
 
     @mcp.tool()
+    def fl_start_pr_script() -> dict:
+        """Start ComposeWithLLM from the piano roll's Tools > Scripting menu.
+
+        FL's trigger keystroke is "run last script again" and does nothing
+        until a piano roll script has been started once per FL Studio session.
+        This does that first start by driving the menu (Linux/X11, FL under
+        Wine), so the piano roll tools work right after an FL Studio start.
+
+        Needs an open, detached piano roll: docked, it has no window of its
+        own and the menu cannot be located. The tools normally do this by
+        themselves when a trigger goes nowhere; set
+        FL_STUDIO_MCP_AUTO_BOOTSTRAP=0 to leave it to this tool alone.
+        """
+        state_before = _state_mtime()
+        if not get_trigger().is_supported:
+            return {
+                "started": False,
+                "error": (
+                    f"Starting the script from the menu is only implemented for "
+                    f"Linux/X11 (FL under Wine); this is {get_trigger().platform}."
+                ),
+            }
+        problem = _start_pr_script_from_menu()
+        if problem is not None:
+            return {"started": False, "error": problem}
+        return {
+            "started": True,
+            "script": PR_SCRIPT_NAME,
+            "state_export_refreshed": _state_mtime() != state_before,
+            "note": (
+                f"{get_trigger().keystroke} now re-runs the script until FL Studio "
+                f"is restarted."
+            ),
+        }
+
+    @mcp.tool()
     def fl_get_piano_roll_info() -> dict:
         """Get information about the Piano Roll integration status.
 
@@ -648,4 +785,5 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
             "state_file": str(_get_state_file()),
             "request_file_exists": _get_request_file().exists(),
             "state_file_exists": _get_state_file().exists(),
+            "script_menu": _pr_script_menu_info(),
         }

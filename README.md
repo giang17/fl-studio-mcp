@@ -263,7 +263,9 @@ No Windows Python and no loopMIDI required - the pieces line up like this:
   is briefly foregrounded first, exactly like on Windows. An undocked piano
   roll is a window of its own under Wine, and then it is foregrounded instead
   of the main window: FL only routes the keystroke to whichever of its windows
-  holds the keyboard focus. This requires an
+  holds the keyboard focus. That window is also how the server starts the
+  script for the first time in an FL session (`fl_start_pr_script`), by driving
+  the piano roll's *Tools > Scripting* menu. This requires an
   **X11 session**. On Wayland the keystroke cannot be synthesized; run the
   script manually from the Piano Roll's *Tools > Scripting* menu instead.
 
@@ -323,13 +325,18 @@ fl-studio-mcp
 
 1. Open FL Studio and select a channel
 2. Open the Piano Roll (F7 or double-click the channel)
-3. Once per FL Studio session, manually run the script from the piano roll: **Tools > Scripting > ComposeWithLLM**
-4. After that, the MCP tools will auto-trigger the script
+3. The MCP tools trigger the script from there on
 
-The trigger keystroke only re-runs the *last* piano roll script, so after every
-FL Studio start (and possibly after loading another project) step 3 is needed
-again. The note tools report whether the script actually ran; if the request
-stays queued, repeat step 3 and call the tool again.
+The trigger keystroke is FL's *run last script again*, so it does nothing until
+ComposeWithLLM has been started once per FL Studio session from the piano roll's
+**Tools > Scripting** menu. On Linux/X11 the server does that first start
+itself when a trigger goes nowhere, and the same run serves the queued request;
+`fl_start_pr_script` does it on demand. It needs the piano roll open and
+**detached**, because only then is it a window the menu can be reached in. Set
+`FL_STUDIO_MCP_AUTO_BOOTSTRAP=0` to keep the server from touching the menu on
+its own. Everywhere else, start the script by hand after each FL Studio start.
+The note tools report whether the script actually ran; if the request stays
+queued, start the script and call the tool again.
 
 Before sending the keystroke the server brings FL Studio to the front and asks
 the controller script to focus the piano roll, so the trigger works even when
@@ -498,6 +505,7 @@ are.
 | `fl_get_piano_roll_state` | Read current piano roll notes |
 | `fl_get_pr_context` | Read piano roll context: time signature, PPQ, tempo, snap-to-scale, selected channel, active pattern |
 | `fl_trigger_script` | Manually trigger the FL Studio script |
+| `fl_start_pr_script` | Start ComposeWithLLM from the piano roll's Tools > Scripting menu (Linux/X11, detached piano roll) |
 | `fl_get_piano_roll_info` | Get piano roll system info |
 | `fl_clear_request_queue` | Cancel pending queued changes |
 
@@ -554,7 +562,7 @@ are.
 
 ### Piano Roll script not triggering
 
-1. Once per FL Studio session: manually run **Tools > Scripting > ComposeWithLLM** from the piano roll (the keystroke only re-runs the last script, so this is needed after every FL Studio start)
+1. Once per FL Studio session the script has to be started from the piano roll's **Tools > Scripting > ComposeWithLLM** (the keystroke only re-runs the last script, so this is needed after every FL Studio start). On Linux/X11 the server does this by itself, or on demand with `fl_start_pr_script`; if that reports no piano roll window, detach the piano roll (its menu > Detached) and try again
 2. On macOS: grant Accessibility permissions when prompted
 3. On Windows: the MCP server foregrounds the FL Studio window automatically before sending the hotkey — if FL Studio isn't running or is minimized to the system tray, the trigger can't find it and will fall back to a warning telling you to press the hotkey manually
 4. Try pressing Cmd+Opt+Y (macOS) or Ctrl+Alt+Y (Windows/Linux) manually to confirm the hotkey itself is bound to the script in FL Studio
