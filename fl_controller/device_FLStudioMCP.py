@@ -431,8 +431,8 @@ def handle_mixer_set_track_color(params: dict) -> dict:
     r = params.get("r", 0)
     g = params.get("g", 0)
     b = params.get("b", 0)
-    # FL Studio uses BGR format
-    color = (b << 16) | (g << 8) | r
+    # FL Studio's scripting API takes 0xRRGGBB
+    color = (r << 16) | (g << 8) | b
     mixer.setTrackColor(track, color)
     return {"color": f"RGB({r}, {g}, {b})"}
 
@@ -607,8 +607,8 @@ def handle_channels_set_color(params: dict) -> dict:
     r = params.get("r", 0)
     g = params.get("g", 0)
     b = params.get("b", 0)
-    # FL Studio uses BGR format
-    color = (b << 16) | (g << 8) | r
+    # FL Studio's scripting API takes 0xRRGGBB
+    color = (r << 16) | (g << 8) | b
     channels.setChannelColor(index, color, True)
     return {"color": f"RGB({r}, {g}, {b})"}
 
