@@ -293,9 +293,9 @@ def _enrich_pr_context(context: dict) -> dict:
     """Fill in what the piano roll runtime cannot report itself.
 
     The `channels` and `patterns` modules are normally not importable from a
-    piano roll script, so the active pattern and the selected channel are
-    fetched from the controller script over MIDI instead. A failing MIDI bridge
-    must not hide the context the script did deliver.
+    piano roll script, so the active pattern, the selected channel and the
+    project tempo are fetched from the controller script over MIDI instead. A
+    failing MIDI bridge must not hide the context the script did deliver.
     """
     from fl_studio_mcp.utils.connection import get_connection
 
@@ -319,6 +319,10 @@ def _enrich_pr_context(context: dict) -> dict:
                     "index": channel.get("index"),
                     "name": channel.get("name"),
                 }
+        if "tempo_bpm" not in context:
+            result = conn.send_command("transport.getTempo")
+            if result.get("success"):
+                context["tempo_bpm"] = result.get("bpm")
     except Exception as e:  # noqa: BLE001 - keep the script's context regardless
         context["controller_error"] = str(e)
     try:
@@ -541,9 +545,9 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
     def fl_get_pr_context() -> dict:
         """Get context of the currently open piano roll (read-only).
 
-        Returns PPQ, time signature, note/marker counts, snap-to-scale info,
-        timeline selection, the active pattern and the channel selected in the
-        channel rack. Useful to verify WHERE notes would be written before
+        Returns PPQ, time signature, tempo, note/marker counts, snap-to-scale
+        info, timeline selection, the active pattern and the channel selected
+        in the channel rack. Useful to verify WHERE notes would be written before
         using fl_send_notes - but note that an open piano roll does not follow
         channel selection made via scripting, only selection in the FL UI.
 

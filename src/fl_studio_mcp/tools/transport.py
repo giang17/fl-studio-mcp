@@ -7,6 +7,28 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
+# FL Studio's project tempo range. Out-of-range values are clamped silently by
+# the REC event, so they are rejected here and in the controller script.
+TEMPO_MIN_BPM = 10.0
+TEMPO_MAX_BPM = 522.0
+
+
+def _tempo_result(result: dict) -> dict:
+    """Shape a controller tempo response for the MCP client."""
+    ppq = result.get("ppq", 0)
+    return {
+        "bpm": result.get("bpm"),
+        "ppq": ppq,
+        "ppb": result.get("ppb", 0),
+        "raw_tempo": result.get("raw_tempo"),
+        # FL only exposes the numerator (bar length in beats) to controller
+        # scripts; the denominator comes from the piano roll (fl_get_pr_context).
+        "time_signature": {
+            "numerator": result.get("beats_per_bar"),
+            "denominator": None,
+        },
+    }
+
 
 def register_transport_tools(mcp: FastMCP) -> None:
     """Register transport control tools with the MCP server."""
@@ -156,3 +178,47 @@ def register_transport_tools(mcp: FastMCP) -> None:
             return f"Error: {result['error']}"
 
         return f"Playback speed set to {speed}x"
+
+    @mcp.tool()
+    def fl_get_tempo() -> dict:
+        """Get the project tempo and timebase (read-only).
+
+        Returns the tempo in BPM, the timebase (ppq = ticks per quarter note,
+        ppb = ticks per bar), the raw milli-BPM value FL reports, and the time
+        signature. Only the numerator (beats per bar) is available here, and it
+        ignores time signature markers in the playlist; the denominator is read
+        from the open piano roll by fl_get_pr_context.
+        """
+        conn = get_connection()
+        result = conn.send_command("transport.getTempo")
+
+        if not result.get("success", False) and "error" in result:
+            return {"error": result["error"]}
+
+        return _tempo_result(result)
+
+    @mcp.tool()
+    def fl_set_tempo(bpm: float) -> dict:
+        """Set the project tempo and return the tempo FL actually applied.
+
+        Call fl_save_undo_point first if the change should be revertible.
+
+        Args:
+            bpm: Tempo in beats per minute, 10 to 522 (FL Studio's range).
+        """
+        if not TEMPO_MIN_BPM <= bpm <= TEMPO_MAX_BPM:
+            return {
+                "error": (
+                    f"bpm must be between {TEMPO_MIN_BPM:g} and {TEMPO_MAX_BPM:g}, got {bpm}"
+                )
+            }
+
+        conn = get_connection()
+        result = conn.send_command("transport.setTempo", {"bpm": float(bpm)})
+
+        if not result.get("success", False) and "error" in result:
+            return {"error": result["error"]}
+
+        applied = _tempo_result(result)
+        applied["requested_bpm"] = result.get("requested_bpm", float(bpm))
+        return applied

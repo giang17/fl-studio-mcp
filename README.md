@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/c2b1a5e7-1640-41fa-82bc-18ca7cbae9e8
 - Get song length and position
 - Control loop mode (pattern/song)
 - Adjust playback speed
+- Read and set the project tempo, read the timebase (PPQ/PPB)
 
 ### Mixer Control
 
@@ -327,6 +328,8 @@ retarget it before writing notes to a specific channel.
 | `fl_get_song_length` | Get song duration |
 | `fl_set_loop_mode` | Switch between pattern/song mode |
 | `fl_set_playback_speed` | Adjust playback speed (0.25x-4x) |
+| `fl_get_tempo` | Read tempo, timebase and time signature numerator |
+| `fl_set_tempo` | Set the project tempo (10-522 BPM) |
 
 ### Mixer
 
@@ -428,7 +431,7 @@ are.
 | `fl_delete_notes` | Delete specific notes |
 | `fl_clear_piano_roll` | Clear all notes |
 | `fl_get_piano_roll_state` | Read current piano roll notes |
-| `fl_get_pr_context` | Read piano roll context: time signature, PPQ, snap-to-scale, selected channel, active pattern |
+| `fl_get_pr_context` | Read piano roll context: time signature, PPQ, tempo, snap-to-scale, selected channel, active pattern |
 | `fl_trigger_script` | Manually trigger the FL Studio script |
 | `fl_get_piano_roll_info` | Get piano roll system info |
 | `fl_clear_request_queue` | Cancel pending queued changes |
