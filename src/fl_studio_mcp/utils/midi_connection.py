@@ -257,25 +257,35 @@ class MIDIConnection:
         start_time = time.time()
         poll_interval = 0.02  # 20ms between checks
 
+        last_error: str | None = None
         while time.time() - start_time < timeout:
             if self._response_file.exists():
                 try:
                     response_text = self._response_file.read_text()
                     response = json.loads(response_text)
+                except (json.JSONDecodeError, OSError) as e:
+                    # The controller is most likely still writing the file
+                    # (FL's interpreter cannot rename atomically); poll again
+                    # instead of failing on a half-written response.
+                    last_error = f"{type(e).__name__}: {e}"
+                    time.sleep(poll_interval)
+                    continue
 
-                    # Clean up response file
-                    try:
-                        self._response_file.unlink()
-                    except Exception:
-                        pass
+                # Clean up response file
+                try:
+                    self._response_file.unlink()
+                except Exception:
+                    pass
 
-                    return response
-                except json.JSONDecodeError as e:
-                    return {"success": False, "error": f"Invalid JSON in response: {e}"}
-                except Exception as e:
-                    return {"success": False, "error": f"Failed to read response: {e}"}
+                return response
 
             time.sleep(poll_interval)
+
+        if last_error:
+            return {
+                "success": False,
+                "error": f"Response file never became readable within {timeout}s ({last_error})",
+            }
 
         return {
             "success": False,

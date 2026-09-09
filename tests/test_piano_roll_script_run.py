@@ -28,6 +28,10 @@ class FakeTrigger:
         self.send_ok = send_ok
         self.calls = 0
 
+    def activate_window(self):
+        self.activations = getattr(self, "activations", 0) + 1
+        return True
+
     def trigger(self, delay=0.0):
         self.calls += 1
         if not self.send_ok:
@@ -45,6 +49,8 @@ def scripts_dir(tmp_path, monkeypatch):
 
 def install_trigger(monkeypatch, trigger):
     monkeypatch.setattr(piano_roll, "get_trigger", lambda: trigger)
+    # The pre-trigger focus step talks to FL over MIDI; keep it out of the tests.
+    monkeypatch.setattr(piano_roll, "_focus_piano_roll", lambda: None)
     return trigger
 
 
@@ -163,6 +169,8 @@ def test_enrich_pr_context_uses_controller_and_strips_script_errors(monkeypatch)
                 return {"success": True, "index": 3, "name": "Verse 1", "length_beats": 32}
             if action == "channels.getSelected":
                 return {"success": True, "channel": {"index": 1, "name": "TruePianos", "pan": 0}}
+            if action == "ui.getFocus":
+                return {"success": True, "caption": "Piano roll -", "focused": {"piano_roll": True}}
             raise AssertionError(action)
 
     import fl_studio_mcp.utils.connection as connection
@@ -180,7 +188,9 @@ def test_enrich_pr_context_uses_controller_and_strips_script_errors(monkeypatch)
     assert enriched["selected_channel"] == {"index": 1, "name": "TruePianos"}
     assert "selected_channel_error" not in enriched
     assert "current_pattern_error" not in enriched
-    assert "title bar" in enriched["note"]
+    assert enriched["piano_roll_focused"] is True
+    assert enriched["focused_caption"] == "Piano roll -"
+    assert "fl_open_piano_roll" in enriched["note"]
 
 
 def test_enrich_pr_context_survives_missing_midi_bridge(monkeypatch):
@@ -218,3 +228,49 @@ def test_queued_request_waits_for_a_late_response(scripts_dir, monkeypatch):
 
     assert run["ran"] is True
     assert run["response"] == response
+
+
+def test_focus_step_runs_before_the_keystroke(scripts_dir, monkeypatch):
+    order = []
+
+    class OrderedTrigger(FakeTrigger):
+        def activate_window(self):
+            order.append("activate")
+            return True
+
+    monkeypatch.setattr(
+        piano_roll, "get_trigger", lambda: OrderedTrigger(lambda: order.append("key"))
+    )
+    monkeypatch.setattr(piano_roll, "_focus_piano_roll", lambda: order.append("focus"))
+
+    piano_roll._run_pr_script(timeout=0.2)
+
+    assert order == ["activate", "focus", "key"]
+
+
+def test_focus_step_is_skipped_when_fl_window_cannot_be_activated(scripts_dir, monkeypatch):
+    order = []
+
+    class NoWindowTrigger(FakeTrigger):
+        def activate_window(self):
+            return False
+
+    monkeypatch.setattr(
+        piano_roll, "get_trigger", lambda: NoWindowTrigger(lambda: order.append("key"))
+    )
+    monkeypatch.setattr(piano_roll, "_focus_piano_roll", lambda: order.append("focus"))
+
+    piano_roll._run_pr_script(timeout=0.2)
+
+    assert order == ["key"]
+
+
+def test_focus_helper_survives_missing_midi_bridge(monkeypatch):
+    import fl_studio_mcp.utils.connection as connection
+
+    def broken():
+        raise RuntimeError("no MIDI port")
+
+    monkeypatch.setattr(connection, "get_connection", broken)
+
+    assert piano_roll._focus_piano_roll() is None

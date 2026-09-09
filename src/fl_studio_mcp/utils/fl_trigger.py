@@ -242,6 +242,39 @@ class FLStudioTrigger:
         except Exception:
             return False
 
+    def activate_window(self) -> bool:
+        """Bring the FL Studio window to the OS foreground without sending a key.
+
+        FL only honours its own window-focus API (ui.setFocused) while its main
+        window is the active OS window, so callers that want to focus the piano
+        roll through the controller must activate FL first, then focus, then
+        send the keystroke via trigger().
+        """
+        try:
+            if self._system == "Darwin":
+                subprocess.run(
+                    ["osascript", "-e", 'tell application "FL Studio" to activate'],
+                    capture_output=True,
+                    timeout=5,
+                )
+                return True
+            if self._system == "Windows":
+                return self._focus_fl_studio_windows()
+            if self._system == "Linux":
+                window_ids = self._find_fl_windows_linux()
+                if not window_ids:
+                    return False
+                subprocess.run(
+                    ["xdotool", "windowactivate", "--sync", window_ids[-1]],
+                    capture_output=True,
+                    timeout=10,
+                    check=True,
+                )
+                return True
+        except Exception:
+            return False
+        return False
+
     def trigger(self, delay: float = TRIGGER_DELAY) -> bool:
         """Trigger FL Studio to execute the Piano Roll script.
 
