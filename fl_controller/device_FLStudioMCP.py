@@ -103,7 +103,8 @@ def execute_pending_command():
 
         # Execute command and get result
         result = dispatch_command(action, params)
-        response = {"success": True, **result}
+        # A handler that returns {"error": ...} has failed; do not mark it a success.
+        response = {"success": not result.get("error"), **result}
 
     except json.JSONDecodeError as e:
         response["error"] = f"Invalid JSON in command file: {e}"
