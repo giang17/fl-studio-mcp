@@ -96,6 +96,32 @@ def _read_state() -> dict | None:
         return None
 
 
+def _wait_for_pr_response(timeout: float = 5.0) -> dict | None:
+    """Wait for the piano roll script's response file and return its content."""
+    import time as _time
+
+    response_file = _get_response_file()
+    if response_file.exists():
+        try:
+            response_file.unlink()
+        except OSError:
+            pass
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        if response_file.exists():
+            try:
+                data = json.loads(response_file.read_text())
+                try:
+                    response_file.unlink()
+                except OSError:
+                    pass
+                return data
+            except (json.JSONDecodeError, IOError):
+                return None
+        _time.sleep(0.05)
+    return None
+
+
 def _midi_to_note_name(midi: int) -> str:
     """Convert MIDI note number to note name."""
     note_names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -329,6 +355,33 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
             return "FL Studio triggered successfully. Notes should now appear in the piano roll."
         else:
             return f"Failed to trigger FL Studio. Try pressing {trigger.keystroke} manually."
+
+    @mcp.tool()
+    def fl_get_pr_context() -> dict:
+        """Get context of the currently open piano roll (read-only).
+
+        Returns PPQ, time signature, note/marker counts, snap-to-scale info,
+        timeline selection, and - if available - the selected channel and
+        active pattern. Useful to verify WHERE notes would be written before
+        using fl_send_notes (the piano roll does not follow channel selection
+        made via scripting).
+        """
+        _write_request({"action": "get_context"})
+        trigger = get_trigger()
+        if trigger.is_supported and trigger_fl_studio():
+            response = _wait_for_pr_response()
+            if response is not None:
+                result = response.get("result") or response
+                context = result.get("context") if isinstance(result, dict) else None
+                if context:
+                    return context
+                return {"raw_response": response}
+            return {"error": "Piano roll script produced no response. Is a piano roll open?"}
+        return {
+            "error": f"Auto-trigger not available ({trigger.platform}); "
+            f"press {trigger.keystroke} manually, then call again with the "
+            f"request already queued."
+        }
 
     @mcp.tool()
     def fl_get_piano_roll_info() -> dict:

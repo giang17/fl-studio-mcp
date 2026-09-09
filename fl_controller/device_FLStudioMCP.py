@@ -113,6 +113,211 @@ def execute_pending_command():
     write_response(response)
 
 
+# ---------------------------------------------------------------------------
+# Pattern management (requires newer FL Studio, lazy-imported)
+# ---------------------------------------------------------------------------
+
+def _patterns_mod():
+    """Lazily import the patterns module (not available on older FL versions)."""
+    import patterns  # noqa: PLC0415
+    return patterns
+
+
+def handle_patterns_get_count(params: dict) -> dict:
+    try:
+        patterns = _patterns_mod()
+        return {
+            "count": patterns.patternCount(),
+            "current": patterns.patternNumber(),
+            "max": patterns.patternMax(),
+        }
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_get_all(params: dict) -> dict:
+    try:
+        patterns = _patterns_mod()
+        include_default = params.get("include_default", False)
+        max_index = patterns.patternMax()
+        out = []
+        for i in range(1, max_index + 1):
+            is_default = patterns.isPatternDefault(i)
+            if is_default and not include_default:
+                continue
+            out.append({
+                "index": i,
+                "name": patterns.getPatternName(i),
+                "color": patterns.getPatternColor(i),
+                "length_beats": patterns.getPatternLength(i),
+                "is_default": is_default,
+                "is_selected": patterns.isPatternSelected(i),
+            })
+        return {"patterns": out, "current": patterns.patternNumber()}
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_get_current(params: dict) -> dict:
+    try:
+        patterns = _patterns_mod()
+        i = patterns.patternNumber()
+        return {
+            "index": i,
+            "name": patterns.getPatternName(i),
+            "length_beats": patterns.getPatternLength(i),
+        }
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_select(params: dict) -> dict:
+    try:
+        patterns = _patterns_mod()
+        index = int(params.get("index", 0))
+        patterns.jumpToPattern(index)
+        return {"selected": index, "name": patterns.getPatternName(index)}
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_new_empty(params: dict) -> dict:
+    """Select the first/next empty pattern (automation-safe: no name prompt).
+
+    Note: patterns are virtual in FL; this jumps to an unused one, which is
+    the closest equivalent to "create new pattern".
+    """
+    try:
+        patterns = _patterns_mod()
+        FFNEP_DontPromptName = 1 << 1  # from midi module flags
+        patterns.findFirstNextEmptyPat(FFNEP_DontPromptName)
+        i = patterns.patternNumber()
+        return {"selected": i, "name": patterns.getPatternName(i)}
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_clone(params: dict) -> dict:
+    """Clone a pattern. NOTE: this closes the piano roll (FL behaviour)."""
+    try:
+        patterns = _patterns_mod()
+        index = params.get("index")
+        if index is None:
+            patterns.clonePattern()
+            new_index = patterns.patternNumber()
+        else:
+            patterns.clonePattern(int(index))
+            new_index = patterns.patternNumber()
+        return {"cloned_to": new_index, "name": patterns.getPatternName(new_index)}
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_patterns_set_name(params: dict) -> dict:
+    try:
+        patterns = _patterns_mod()
+        index = int(params.get("index", 0))
+        name = str(params.get("name", ""))
+        patterns.setPatternName(index, name)
+        return {"index": index, "name": patterns.getPatternName(index)}
+    except ImportError:
+        return {"error": "patterns module not available (requires FL Studio 2024+)"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Undo / redo safety net
+# ---------------------------------------------------------------------------
+
+def _general_mod():
+    import general  # noqa: PLC0415
+    return general
+
+
+def handle_general_undo(params: dict) -> dict:
+    try:
+        general = _general_mod()
+        result = general.undoUp()
+        return {"undone": True, "result": result,
+                "history_pos": general.getUndoHistoryPos(),
+                "history_count": general.getUndoHistoryCount()}
+    except ImportError:
+        return {"error": "general module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_general_redo(params: dict) -> dict:
+    try:
+        general = _general_mod()
+        result = general.undoDown()
+        return {"redone": True, "result": result,
+                "history_pos": general.getUndoHistoryPos(),
+                "history_count": general.getUndoHistoryCount()}
+    except ImportError:
+        return {"error": "general module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# UF flags (see FL API docs for general.saveUndo)
+_UNDO_FLAGS = {
+    "none": 0, "ee": 1, "pr": 2, "playlist": 4, "knob": 32,
+    "audio_rec": 256, "auto_clip": 512, "pr_marker": 1024,
+    "pl_marker": 2048, "plugin": 4096, "ss_looping": 8192, "reset": 65536,
+}
+
+
+def handle_general_save_undo_point(params: dict) -> dict:
+    try:
+        general = _general_mod()
+        name = str(params.get("name", "MCP undo point"))
+        flags_in = params.get("flags", ["pr", "playlist", "knob", "ss_looping"])
+        if isinstance(flags_in, str):
+            flags_in = [flags_in]
+        flags = 0
+        for f in flags_in:
+            flags |= _UNDO_FLAGS.get(str(f).lower(), 0)
+        general.saveUndo(name, flags)
+        return {"saved": True, "name": name, "flags": flags,
+                "history_pos": general.getUndoHistoryPos(),
+                "history_count": general.getUndoHistoryCount()}
+    except ImportError:
+        return {"error": "general module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_general_get_undo_status(params: dict) -> dict:
+    try:
+        general = _general_mod()
+        return {
+            "history_count": general.getUndoHistoryCount(),
+            "history_pos": general.getUndoHistoryPos(),
+            "history_last": general.getUndoHistoryLast(),
+            "level_hint": general.getUndoLevelHint(),
+            "changed_flag": general.getChangedFlag(),
+            "safe_to_edit": general.safeToEdit(),
+        }
+    except ImportError:
+        return {"error": "general module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def write_response(response: dict):
     """Write response to JSON file."""
     try:
@@ -225,6 +430,28 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_plugins_next_preset(params)
     elif action == "plugins.prevPreset":
         return handle_plugins_prev_preset(params)
+    elif action == "patterns.getCount":
+        return handle_patterns_get_count(params)
+    elif action == "patterns.getAll":
+        return handle_patterns_get_all(params)
+    elif action == "patterns.getCurrent":
+        return handle_patterns_get_current(params)
+    elif action == "patterns.select":
+        return handle_patterns_select(params)
+    elif action == "patterns.newEmpty":
+        return handle_patterns_new_empty(params)
+    elif action == "patterns.clone":
+        return handle_patterns_clone(params)
+    elif action == "patterns.setName":
+        return handle_patterns_set_name(params)
+    elif action == "general.undo":
+        return handle_general_undo(params)
+    elif action == "general.redo":
+        return handle_general_redo(params)
+    elif action == "general.saveUndoPoint":
+        return handle_general_save_undo_point(params)
+    elif action == "general.getUndoStatus":
+        return handle_general_get_undo_status(params)
     elif action == "plugins.getColor":
         return handle_plugins_get_color(params)
 
