@@ -445,11 +445,6 @@ def _ticks_to_bst(ticks: int, ppq: int, ppb: int) -> dict:
     }
 
 
-def _color_to_rgb(color: int) -> dict:
-    """FL colors are 0x--BBGGRR (reported as signed ints)."""
-    return {"r": color & 0xFF, "g": (color >> 8) & 0xFF, "b": (color >> 16) & 0xFF}
-
-
 def _playlist_track_index_error(playlist, index) -> dict | None:
     count = playlist.trackCount()
     if isinstance(index, bool) or not isinstance(index, int) or index < 1 or index > count:
@@ -469,7 +464,7 @@ def _playlist_track_report(playlist, index: int) -> dict:
         "index": index,
         "name": name,
         "is_unnamed": _is_default_track_name(index, name),
-        "color": "#%02x%02x%02x" % (color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF),
+        "color": "#%06x" % color,
         "is_muted": bool(playlist.isTrackMuted(index)),
         "is_solo": bool(playlist.isTrackSolo(index)),
         "is_selected": bool(playlist.isTrackSelected(index)),
@@ -533,8 +528,7 @@ def handle_playlist_set_track(params: dict) -> dict:
         if params.get("rgb") is not None:
             rgb = params["rgb"]
             r, g, b = int(rgb["r"]), int(rgb["g"]), int(rgb["b"])
-            # FL Studio uses BGR format
-            playlist.setTrackColor(index, (b << 16) | (g << 8) | r)
+            playlist.setTrackColor(index, (r << 16) | (g << 8) | b)
             changed.append("color")
         if params.get("muted") is not None:
             playlist.muteTrack(index, 1 if params["muted"] else 0)
@@ -1191,8 +1185,7 @@ def handle_mixer_set_track_color(params: dict) -> dict:
     r = params.get("r", 0)
     g = params.get("g", 0)
     b = params.get("b", 0)
-    # FL Studio uses BGR format
-    color = (b << 16) | (g << 8) | r
+    color = (r << 16) | (g << 8) | b
     mixer.setTrackColor(track, color)
     return {"color": f"RGB({r}, {g}, {b})"}
 
@@ -1367,8 +1360,7 @@ def handle_channels_set_color(params: dict) -> dict:
     r = params.get("r", 0)
     g = params.get("g", 0)
     b = params.get("b", 0)
-    # FL Studio uses BGR format
-    color = (b << 16) | (g << 8) | r
+    color = (r << 16) | (g << 8) | b
     channels.setChannelColor(index, color, True)
     return {"color": f"RGB({r}, {g}, {b})"}
 
