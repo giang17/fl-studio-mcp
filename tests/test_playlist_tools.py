@@ -367,7 +367,7 @@ def test_controller_marker_names_stop_at_the_first_empty_name(controller, monkey
     assert controller.handle_arrangement_get_marker_names({})["names"] == ["Intro", "Chorus"]
 
 
-def test_controller_track_report_normalizes_signed_bgr_colors(controller, monkeypatch):
+def test_controller_track_report_normalizes_signed_colors(controller, monkeypatch):
     import playlist
 
     monkeypatch.setattr(playlist, "getTrackName", lambda i: "Track 3")
@@ -376,7 +376,7 @@ def test_controller_track_report_normalizes_signed_bgr_colors(controller, monkey
     report = controller._playlist_track_report(playlist, 3)
 
     assert report["is_unnamed"] is True
-    assert report["color"] == "#565148"
+    assert report["color"] == "#485156"  # 0xRRGGBB, not byte-reversed
 
 
 def test_controller_set_track_only_toggles_selection_when_needed(controller, monkeypatch):
@@ -393,7 +393,7 @@ def test_controller_set_track_only_toggles_selection_when_needed(controller, mon
         {"index": 3, "selected": True, "muted": True, "rgb": {"r": 0x3F, "g": 0xA7, "b": 0xD6}}
     )
 
-    assert calls == [("color", 3, 0xD6A73F), ("mute", 3, 1)]
+    assert calls == [("color", 3, 0x3FA7D6), ("mute", 3, 1)]
     assert result["changed"] == ["color", "muted", "selected"]
 
 
