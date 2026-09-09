@@ -260,7 +260,10 @@ No Windows Python and no loopMIDI required - the pieces line up like this:
   command/response files match up automatically.
 - **Piano Roll trigger**: same Ctrl+Alt+Y keystroke as on Windows, sent via
   [xdotool](https://man.archlinux.org/man/xdotool.1) - the FL Studio window
-  is briefly foregrounded first, exactly like on Windows. This requires an
+  is briefly foregrounded first, exactly like on Windows. An undocked piano
+  roll is a window of its own under Wine, and then it is foregrounded instead
+  of the main window: FL only routes the keystroke to whichever of its windows
+  holds the keyboard focus. This requires an
   **X11 session**. On Wayland the keystroke cannot be synthesized; run the
   script manually from the Piano Roll's *Tools > Scripting* menu instead.
 
@@ -335,7 +338,8 @@ follow channels selected via scripting; call `fl_open_piano_roll(channel)` to
 retarget it before writing notes to a specific channel.
 
 > On Linux the auto-trigger uses `xdotool` (X11 sessions only) and sends the
-> same Ctrl+Alt+Y keystroke as on Windows.
+> same Ctrl+Alt+Y keystroke as on Windows. An undocked piano roll gets the
+> keystroke directly, since under Wine it is a top-level window of its own.
 
 ## Available Tools
 

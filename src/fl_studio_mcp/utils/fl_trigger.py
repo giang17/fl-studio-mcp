@@ -186,6 +186,12 @@ class FLStudioTrigger:
     # so prefer titles that end in "FL Studio <version>".
     LINUX_WINDOW_RE = r"( - |^)FL Studio [0-9]+$"
 
+    # An undocked piano roll is its own top-level X window under Wine, titled
+    # "Piano roll -" (plus the target channel's name). Ctrl+Alt+Y only starts
+    # the script while the piano roll holds the keyboard focus, so this window
+    # is the trigger target whenever it exists.
+    LINUX_PIANO_ROLL_RE = r"^Piano roll"
+
     def _find_fl_windows_linux(self) -> list[str]:
         """Return candidate FL Studio window ids, best match first."""
         try:
@@ -211,6 +217,37 @@ class FLStudioTrigger:
                 return []
         return [line for line in search.stdout.splitlines() if line.strip()]
 
+    def _find_piano_roll_window_linux(self) -> str | None:
+        """Id of FL's undocked piano roll window, or None when there is none.
+
+        Scoped to FL's own process, so a browser tab or editor showing the
+        words "Piano roll" cannot be mistaken for it.
+        """
+        try:
+            from fl_studio_mcp.utils.x11_automation import get_x11_automation
+
+            x11 = get_x11_automation()
+            if not x11.available:
+                return None
+            window = x11.find_window(self.LINUX_PIANO_ROLL_RE)
+        except Exception:  # noqa: BLE001 - best effort; the main window still works
+            return None
+        return None if window is None else window.id
+
+    def _find_trigger_window_linux(self) -> str | None:
+        """Window the trigger keystroke should be aimed at, or None if FL is gone.
+
+        An undocked piano roll owns the keyboard focus itself; activating the
+        main window instead takes the focus away from it and FL never routes
+        Ctrl+Alt+Y to the script. Docked, no such window exists and the main
+        window is the right target.
+        """
+        piano_roll = self._find_piano_roll_window_linux()
+        if piano_roll is not None:
+            return piano_roll
+        window_ids = self._find_fl_windows_linux()
+        return window_ids[-1] if window_ids else None
+
     def _trigger_linux(self) -> bool:
         """Trigger FL Studio (running under Wine/X11) using xdotool.
 
@@ -219,11 +256,10 @@ class FLStudioTrigger:
         (xdotool cannot synthesize keys on Wayland).
         """
         try:
-            window_ids = self._find_fl_windows_linux()
-            if not window_ids:
+            window_id = self._find_trigger_window_linux()
+            if window_id is None:
                 return False
 
-            window_id = window_ids[-1]
             subprocess.run(
                 ["xdotool", "windowactivate", "--sync", window_id],
                 capture_output=True,
