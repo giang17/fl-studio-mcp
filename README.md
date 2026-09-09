@@ -63,9 +63,14 @@ https://github.com/user-attachments/assets/c2b1a5e7-1640-41fa-82bc-18ca7cbae9e8
 
 The FL Studio scripting API does **not** support loading new VST/AU plugins. You can only control parameters of plugins that are already loaded in your project.
 
-### Cannot Create Patterns
+### Patterns Are Only Partly Scriptable
 
-There is no API to programmatically create new patterns. You can only work with existing patterns.
+The scripting API can select, clone and rename patterns and jump to the
+next empty one (`fl_new_pattern`), but it cannot delete, insert, move,
+transpose or split them. On Linux/X11 the server fills that gap by driving
+FL Studio's own shortcuts and pattern menu (see
+[Pattern menu automation](#pattern-menu-automation)); elsewhere those
+operations remain manual.
 
 ## Requirements
 
@@ -274,6 +279,30 @@ setup:
 > available output - the first port could be a real hardware device (your
 > keyboard or audio interface). Set `FL_STUDIO_MCP_MIDI_PORT` to override.
 
+### Pattern menu automation
+
+Delete, insert, move, transpose and split-by-channel have no scripting API.
+On Linux/X11 the server sends FL Studio's fixed shortcuts (Shift+Ctrl+Del,
+Shift+Ctrl+Ins, Shift+Ctrl+Up/Down) or opens the pattern menu by clicking
+the small triangle left of the pattern selector, all via `xdotool`. Under
+Wine every FL dialog, popup menu and inline edit field is its own X window,
+so each step is verified: the tools wait for the window FL should open
+("Confirm", "Pattern N name", "Semitones"), act on it, wait for it to close
+and then re-read the pattern list through the API. An unexpected window is
+closed with Escape and reported instead of guessed at.
+
+The menu triangle is located by an offset from the FL main window's
+top-left corner, measured with the default toolbar layout on a 1920x1080
+window. If your toolbar differs, measure the triangle and set
+`FL_STUDIO_MCP_PATTERN_MENU_OFFSET="x,y"`. Menu entries are reached with
+`End` followed by `Up` presses because the menu's initial highlight sits on
+the current pattern and would make counting from the top depend on the
+pattern count.
+
+The time signature does **not** need any of this: FL stores it as a marker
+at the pattern start, which the piano roll script writes directly
+(`fl_set_pattern_time_signature`), on every platform.
+
 ## Usage
 
 ### Running the Server Manually
@@ -405,9 +434,21 @@ retarget it before writing notes to a specific channel.
 | `fl_new_pattern` | Switch to the next empty pattern (automation-safe) |
 | `fl_clone_pattern` | Clone a pattern (closes the piano roll - FL behaviour) |
 | `fl_rename_pattern` | Rename a pattern |
+| `fl_set_pattern_time_signature` | Set a pattern's time signature (1-16 / 2, 4, 8, 16) via a marker written by the piano roll script |
+| `fl_delete_pattern` | Delete a pattern (Shift+Ctrl+Del + "Confirm" dialog) * |
+| `fl_insert_pattern` | Insert an empty pattern before another one, optionally named ("Insert one") * |
+| `fl_move_pattern` | Move a pattern up/down in the list (Shift+Ctrl+Up/Down) * |
+| `fl_transpose_pattern` | Transpose all channels of a pattern by semitones (pattern menu > Transpose) * |
+| `fl_split_pattern_by_channel` | Split a pattern into one pattern per channel (pattern menu > Split by channel) * |
 
 Requires FL Studio 2024+ (the `patterns` scripting module); older versions
 get a clear error message.
+
+\* No scripting API exists for these; the server drives FL Studio's own
+shortcuts and pattern menu through X11 keyboard/mouse automation and
+verifies the result through the pattern API afterwards. **Linux/X11 only**
+(FL Studio under Wine, `xdotool`); on other platforms the tools return an
+error explaining that. See [Pattern menu automation](#pattern-menu-automation).
 
 ### Playlist / Arrangement
 

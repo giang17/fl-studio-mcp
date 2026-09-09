@@ -13,7 +13,8 @@ Requirements:
 
 Limitations:
 - Cannot load new plugins (only control existing ones)
-- Cannot create new patterns programmatically
+- Patterns: select/clone/rename via API; delete/insert/move/transpose/split
+  only through UI automation (Linux/X11)
 """
 
 from __future__ import annotations
@@ -52,7 +53,8 @@ Available tool categories:
 
 Important limitations:
 1. Cannot load new VST/AU plugins - only control existing ones
-2. Cannot create new patterns programmatically
+2. Pattern delete/insert/move/transpose/split have no API; the tools drive
+   FL's shortcuts and pattern menu (Linux/X11 only) and verify afterwards
 3. Note triggering (fl_trigger_note) is real-time only - notes won't persist
    unless FL Studio is recording. Use step sequencer (fl_set_grid_bit) for
    persistent drum patterns.
