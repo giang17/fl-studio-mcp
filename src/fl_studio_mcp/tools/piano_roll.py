@@ -97,15 +97,16 @@ def _read_state() -> dict | None:
 
 
 def _wait_for_pr_response(timeout: float = 5.0) -> dict | None:
-    """Wait for the piano roll script's response file and return its content."""
+    """Wait for the piano roll script's response file and return its content.
+
+    Any stale response file must be removed by the CALLER before triggering
+    the script - deleting it here would race with the script, which typically
+    answers within milliseconds while the caller may still be inside the
+    trigger's post-keystroke delay.
+    """
     import time as _time
 
     response_file = _get_response_file()
-    if response_file.exists():
-        try:
-            response_file.unlink()
-        except OSError:
-            pass
     deadline = _time.time() + timeout
     while _time.time() < deadline:
         if response_file.exists():
@@ -367,8 +368,19 @@ def register_piano_roll_tools(mcp: FastMCP) -> None:
         made via scripting).
         """
         _write_request({"action": "get_context"})
+
+        # Remove stale response BEFORE triggering: the script answers within
+        # milliseconds, while trigger_fl_studio() sleeps after the keystroke -
+        # deleting inside the wait would discard the fresh answer.
+        response_file = _get_response_file()
+        if response_file.exists():
+            try:
+                response_file.unlink()
+            except OSError:
+                pass
+
         trigger = get_trigger()
-        if trigger.is_supported and trigger_fl_studio():
+        if trigger.is_supported and trigger.trigger(delay=0.2):
             response = _wait_for_pr_response()
             if response is not None:
                 result = response.get("result") or response

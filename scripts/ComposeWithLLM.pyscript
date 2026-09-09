@@ -128,12 +128,13 @@ def process_mcp_request():
         # Process all requests in order
         total_notes = 0
         notes_deleted = 0
+        context_result = None
 
         for request in requests:
             action = request.get("action")
 
             if action == "get_context":
-                result = get_piano_roll_context()
+                context_result = get_piano_roll_context()
             elif action == "clear":
                 # Clear all notes
                 count = flp.score.noteCount
@@ -157,12 +158,15 @@ def process_mcp_request():
         with open(REQUEST_FILE, 'w') as f:
             f.write("[]")
 
-        return {
+        summary = {
             "status": "success",
             "requests_processed": len(requests),
             "notes_added": total_notes,
             "notes_deleted": notes_deleted
         }
+        if context_result is not None:
+            summary["context"] = context_result.get("context", context_result)
+        return summary
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
